@@ -290,6 +290,34 @@ router.delete('/:id', protect, authorize('superadmin'), async (req, res) => {
   }
 });
 
+// @route   DELETE /api/orders/:id/permanent
+// @desc    Permanently delete order from database
+// @access  Private/Superadmin
+router.delete('/:id/permanent', protect, authorize('superadmin'), async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id);
+    if (!order) {
+      return res.status(404).json({ message: 'Pedido não encontrado' });
+    }
+    
+    // Update table status if this was the current order
+    const table = await Table.findById(order.table);
+    if (table && table.currentOrder && table.currentOrder.toString() === order._id.toString()) {
+      table.status = 'available';
+      table.currentOrder = null;
+      await table.save();
+    }
+    
+    // Permanently delete the order
+    await Order.deleteOne({ _id: order._id });
+    
+    res.json({ message: 'Pedido excluído permanentemente' });
+  } catch (error) {
+    console.error('Permanent delete order error:', error);
+    res.status(500).json({ message: 'Erro no servidor' });
+  }
+});
+
 // @route   GET /api/orders/table/:tableId
 // @desc    Get orders for a specific table
 // @access  Private

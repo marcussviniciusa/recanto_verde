@@ -163,13 +163,18 @@ const OrderManagement = () => {
       setLoading(true);
       setError(null);
       setSuccess(null);
-      await axios.delete(`/api/orders/${deleteDialog.order._id}`);
+      
+      // Usar o endpoint de exclusão permanente
+      await axios.delete(`/api/orders/${deleteDialog.order._id}/permanent`);
+      
+      // Atualizar o estado local removendo o pedido
       setOrders(prev => prev.filter(o => o._id !== deleteDialog.order._id));
-      setSuccess('Pedido cancelado com sucesso!');
+      
+      setSuccess('Pedido excluído permanentemente com sucesso!');
       setDeleteDialog({ open: false, order: null });
     } catch (err) {
-      console.error('Erro ao cancelar pedido:', err);
-      setError(err.response?.data?.message || 'Erro ao cancelar pedido.');
+      console.error('Erro ao excluir pedido:', err);
+      setError(err.response?.data?.message || 'Erro ao excluir pedido permanentemente.');
     } finally {
       setLoading(false);
     }
@@ -484,10 +489,10 @@ const OrderManagement = () => {
                           size="small"
                           color="error"
                           onClick={() => setDeleteDialog({ open: true, order })}
-                          title="Cancelar pedido"
+                          title="Excluir permanentemente"
                           sx={{ ml: 0.5 }}
                         >
-                          <DeleteIcon fontSize="small" />
+                          <DeleteIcon fontSize="small" sx={{ color: 'error.dark' }} />
                         </IconButton>
                       </TableCell>
                     </TableRow>
@@ -727,13 +732,16 @@ const OrderManagement = () => {
         open={deleteDialog.open}
         onClose={() => setDeleteDialog({ open: false, order: null })}
       >
-        <DialogTitle>Confirmar Cancelamento</DialogTitle>
+        <DialogTitle>Confirmar Exclusão Permanente</DialogTitle>
         <DialogContent>
+          <Typography color="error" variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1 }}>
+            ATENÇÃO: Esta ação não pode ser desfeita!
+          </Typography>
           <Typography>
-            Tem certeza que deseja cancelar o pedido <strong>#{deleteDialog.order?._id?.substring(deleteDialog.order?._id?.length - 6).toUpperCase()}</strong>?
+            Tem certeza que deseja <strong>excluir permanentemente</strong> o pedido <strong>#{deleteDialog.order?._id?.substring(deleteDialog.order?._id?.length - 6).toUpperCase()}</strong>?
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            O pedido será cancelado e não poderá ser recuperado.
+            O pedido será removido definitivamente do banco de dados e todos os seus dados serão perdidos.
           </Typography>
         </DialogContent>
         <DialogActions>
@@ -747,7 +755,7 @@ const OrderManagement = () => {
             disabled={loading}
             startIcon={loading ? <CircularProgress size={20} /> : <DeleteIcon />}
           >
-            Cancelar Pedido
+            Excluir Permanentemente
           </Button>
         </DialogActions>
       </Dialog>
