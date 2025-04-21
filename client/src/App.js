@@ -102,6 +102,15 @@ function App() {
           />
           
           <Route 
+            path="/orders/:id" 
+            element={
+              <ProtectedRoute>
+                <OrderManagement />
+              </ProtectedRoute>
+            } 
+          />
+          
+          <Route 
             path="/analytics" 
             element={
               <ProtectedRoute requiredRole="superadmin">

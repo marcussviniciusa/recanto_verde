@@ -10,16 +10,80 @@ import {
   Chip,
   Alert,
   Divider,
-  useTheme
+  useTheme,
+  Tooltip,
+  Badge
 } from '@mui/material';
 import TableRestaurantIcon from '@mui/icons-material/TableRestaurant';
 import PersonIcon from '@mui/icons-material/Person';
 import RestaurantMenuIcon from '@mui/icons-material/RestaurantMenu';
 import ReceiptIcon from '@mui/icons-material/Receipt';
+import LinkIcon from '@mui/icons-material/Link';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useSocket } from '../../context/SocketContext';
 import AppLayout from '../../components/layout/AppLayout';
+import { keyframes } from '@emotion/react';
+
+const pulseBorder = keyframes`
+  0% {
+    box-shadow: 0 0 0 0 rgba(63, 81, 181, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(63, 81, 181, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(63, 81, 181, 0);
+  }
+`;
+
+const waveAnimation = keyframes`
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+`;
+
+const pulseOccupiedAnimation = keyframes`
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 152, 0, 0.7);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(255, 152, 0, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 152, 0, 0);
+  }
+`;
+
+const glowAnimation = keyframes`
+  0% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.2);
+  }
+  100% {
+    filter: brightness(1);
+  }
+`;
+
+const borderPulseAnimation = keyframes`
+  0% {
+    border-color: rgba(255, 152, 0, 0.6);
+  }
+  50% {
+    border-color: rgba(255, 152, 0, 1);
+  }
+  100% {
+    border-color: rgba(255, 152, 0, 0.6);
+  }
+`;
 
 const WaiterDashboard = () => {
   const [tables, setTables] = useState([]);
@@ -27,20 +91,17 @@ const WaiterDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const navigate = useNavigate();
-  const { notifications } = useSocket();
+  const { notifications, socket } = useSocket();
   const theme = useTheme();
 
-  // Load tables and active orders
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true);
         
-        // Fetch tables
         const tablesResponse = await axios.get('/api/tables');
         setTables(tablesResponse.data);
         
-        // Fetch active orders
         const ordersResponse = await axios.get('/api/orders/status/active');
         setActiveOrders(ordersResponse.data);
         
@@ -55,7 +116,6 @@ const WaiterDashboard = () => {
     
     fetchData();
     
-    // Set up polling for real-time updates
     const interval = setInterval(() => {
       fetchData();
     }, 30000); // Update every 30 seconds
@@ -63,17 +123,13 @@ const WaiterDashboard = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // Listen for notification updates
   useEffect(() => {
-    // Refresh data when relevant notifications arrive
     if (notifications.some(n => !n.read && (n.type === 'table' || n.type === 'ready'))) {
       const fetchData = async () => {
         try {
-          // Fetch tables
           const tablesResponse = await axios.get('/api/tables');
           setTables(tablesResponse.data);
           
-          // Fetch active orders
           const ordersResponse = await axios.get('/api/orders/status/active');
           setActiveOrders(ordersResponse.data);
         } catch (err) {
@@ -85,12 +141,58 @@ const WaiterDashboard = () => {
     }
   }, [notifications]);
 
-  // Navigate to table service page
+  useEffect(() => {
+    if (!socket) {
+      console.log('Socket not available');
+      return;
+    }
+    
+    console.log('Setting up socket listener for table status changes');
+    
+    // Listener para atualização de status de mesa
+    const handleTableStatusChange = (data) => {
+      console.log('Table status changed via socket:', data);
+      
+      // Verificar se temos os dados necessários
+      if (!data || !data.tableId) {
+        console.warn('Received invalid table status update data', data);
+        return;
+      }
+      
+      // Extrair o ID da mesa e garantir que é uma string para comparação
+      const tableId = typeof data.tableId === 'object' ? data.tableId._id : data.tableId.toString();
+      
+      // Atualizar a mesa local imediatamente sem fazer nova requisição
+      setTables(prevTables => 
+        prevTables.map(table => {
+          // Garantir que estamos comparando strings
+          const currentTableId = typeof table._id === 'object' ? table._id.toString() : table._id.toString();
+          
+          if (currentTableId === tableId) {
+            console.log(`Updating table ${table.tableNumber} status to ${data.status}`);
+            return { ...table, status: data.status };
+          }
+          return table;
+        })
+      );
+    };
+    
+    // Registrar listeners para ambos os eventos que podem atualizar status de mesa
+    socket.on('tableStatusChanged', handleTableStatusChange);
+    socket.on('tableUpdated', handleTableStatusChange);
+    
+    // Limpar o listener quando o componente for desmontado
+    return () => {
+      console.log('Cleaning up socket listeners');
+      socket.off('tableStatusChanged', handleTableStatusChange);
+      socket.off('tableUpdated', handleTableStatusChange);
+    };
+  }, [socket]);
+
   const handleTableClick = (tableId) => {
     navigate(`/table/${tableId}`);
   };
   
-  // Get table status class
   const getTableStatusClass = (status) => {
     switch (status) {
       case 'available':
@@ -104,7 +206,6 @@ const WaiterDashboard = () => {
     }
   };
   
-  // Get table status text
   const getTableStatusText = (status) => {
     switch (status) {
       case 'available':
@@ -118,7 +219,8 @@ const WaiterDashboard = () => {
     }
   };
   
-  // Group tables by section
+  // Grupo de mesas por seção - certifique-se de que as mesas virtuais também apareçam
+  // Não filtramos por isVirtual para que todas as mesas apareçam
   const groupedTables = tables.reduce((acc, table) => {
     const section = table.section || 'main';
     if (!acc[section]) {
@@ -128,21 +230,83 @@ const WaiterDashboard = () => {
     return acc;
   }, {});
   
-  // Sort tables by number within each section
   Object.keys(groupedTables).forEach(section => {
     groupedTables[section].sort((a, b) => a.tableNumber - b.tableNumber);
   });
   
-  // Get order count for a table
   const getOrderCount = (tableId) => {
     return activeOrders.filter(order => order.table._id === tableId).length;
   };
   
-  // Get notification count for a table
   const getTableNotifications = (tableId) => {
     return notifications.filter(
       n => !n.read && (n.type === 'ready' || n.type === 'order') && n.data?.tableId === tableId
     ).length;
+  };
+
+  const renderJoinedTableIndicator = (table) => {
+    if (!table.isJoined && !table.parentTable) {
+      return null;
+    }
+    
+    let joinedCount = 1; 
+    let tooltipText = 'Mesa unida';
+    
+    if (table.isJoined) {
+      if (table.joinedWith && Array.isArray(table.joinedWith)) {
+        joinedCount += table.joinedWith.length;
+        tooltipText = `Mesa unida com ${table.joinedWith.length} outras`;
+      } else {
+        tooltipText = 'Mesa unida com outras mesas';
+      }
+    } else if (table.parentTable) {
+      tooltipText = 'Esta mesa faz parte de uma união';
+    }
+    
+    return (
+      <Box
+        sx={{
+          position: 'absolute',
+          top: -8,
+          left: -8,
+          zIndex: 2,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 0.5
+        }}
+      >
+        <Tooltip title={tooltipText}>
+          <Badge
+            badgeContent={joinedCount > 1 ? joinedCount : null}
+            color="primary"
+            sx={{
+              '& .MuiBadge-badge': {
+                fontSize: '0.7rem',
+                height: 18,
+                minWidth: 18
+              }
+            }}
+          >
+            <Box
+              sx={{
+                bgcolor: 'primary.main',
+                color: 'white',
+                width: 24,
+                height: 24,
+                borderRadius: '50%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: '0px 2px 4px rgba(0,0,0,0.2)',
+                animation: table.isJoined ? `${pulseBorder} 2s infinite` : 'none'
+              }}
+            >
+              <LinkIcon fontSize="small" sx={{ fontSize: '0.9rem' }} />
+            </Box>
+          </Badge>
+        </Tooltip>
+      </Box>
+    );
   };
 
   if (loading) {
@@ -172,7 +336,6 @@ const WaiterDashboard = () => {
         </Typography>
       </Box>
       
-      {/* Tables grouped by section */}
       {Object.keys(groupedTables).length === 0 ? (
         <Paper 
           elevation={1} 
@@ -224,7 +387,63 @@ const WaiterDashboard = () => {
                         transform: 'scale(1.03)',
                       },
                       position: 'relative',
-                      height: '100%'
+                      height: '100%',
+                      display: 'flex',
+                      bgcolor: table.status === 'occupied' 
+                        ? '#FFC107 !important' 
+                        : table.status === 'available' 
+                          ? '#4CAF50 !important' 
+                          : table.status === 'reserved' 
+                            ? '#FF9800 !important' 
+                            : 'inherit',
+                      color: table.status === 'occupied' 
+                        ? 'black !important' 
+                        : 'white !important',
+                      // Estilos para mesas unidas disponíveis (azul)
+                      ...(table.isJoined && table.status === 'available' && {
+                        borderWidth: 2,
+                        borderStyle: 'solid',
+                        borderColor: 'primary.main',
+                        backgroundImage: 
+                          'linear-gradient(90deg, rgba(63,81,181,0.05) 50%, rgba(63,81,181,0.1) 50%)',
+                        backgroundSize: '20px 100%',
+                        animation: `${waveAnimation} 20s linear infinite, ${pulseBorder} 2s infinite`,
+                        boxShadow: theme => `0 0 10px ${theme.palette.primary.main}`
+                      }),
+                      // Estilos melhorados para mesas unidas ocupadas (amarelo/laranja)
+                      ...(table.isJoined && table.status === 'occupied' && {
+                        borderWidth: 3,
+                        borderStyle: 'solid',
+                        borderColor: 'warning.main',
+                        backgroundImage: 
+                          'linear-gradient(45deg, rgba(255, 152, 0, 0.15) 25%, rgba(255, 152, 0, 0.25) 25%, rgba(255, 152, 0, 0.25) 50%, rgba(255, 152, 0, 0.15) 50%, rgba(255, 152, 0, 0.15) 75%, rgba(255, 152, 0, 0.25) 75%, rgba(255, 152, 0, 0.25) 100%)',
+                        backgroundSize: '30px 30px',
+                        animation: `
+                          ${waveAnimation} 15s linear infinite, 
+                          ${pulseOccupiedAnimation} 2s infinite,
+                          ${glowAnimation} 3s infinite,
+                          ${borderPulseAnimation} 2s infinite
+                        `,
+                        boxShadow: '0 0 20px rgba(255, 152, 0, 0.7)'
+                      }),
+                      // Estilos para mesas virtuais - agora mostradas, mas com estilo diferente
+                      ...(table.isVirtual && {
+                        opacity: 0.9,
+                        filter: 'grayscale(0.2)',
+                        border: '2px dashed',
+                        borderColor: theme => 
+                          table.status === 'occupied' 
+                            ? theme.palette.warning.main 
+                            : theme.palette.primary.main,
+                        // Fundo especial para mesa virtual ocupada
+                        ...(table.status === 'occupied' && {
+                          backgroundImage: 
+                            'linear-gradient(45deg, rgba(255, 152, 0, 0.15) 25%, rgba(255, 152, 0, 0.25) 25%, rgba(255, 152, 0, 0.25) 50%, rgba(255, 152, 0, 0.15) 50%, rgba(255, 152, 0, 0.15) 75%, rgba(255, 152, 0, 0.25) 75%, rgba(255, 152, 0, 0.25) 100%)',
+                          backgroundSize: '30px 30px',
+                          animation: `${waveAnimation} 15s linear infinite`,
+                          boxShadow: '0 0 15px rgba(255, 152, 0, 0.5)'
+                        })
+                      })
                     }}
                   >
                     {getTableNotifications(table._id) > 0 && (
@@ -250,6 +469,8 @@ const WaiterDashboard = () => {
                         {getTableNotifications(table._id)}
                       </Box>
                     )}
+                    
+                    {renderJoinedTableIndicator(table)}
                     
                     <CardContent>
                       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
@@ -278,11 +499,131 @@ const WaiterDashboard = () => {
                         </Typography>
                       </Box>
                       
+                      {(table.isJoined || table.isVirtual) && (
+                        <Box 
+                          sx={{ 
+                            display: 'flex', 
+                            alignItems: 'center', 
+                            mb: 1, 
+                            px: 1.5,
+                            py: 0.5,
+                            borderRadius: 8,
+                            bgcolor: table.status === 'occupied' 
+                              ? 'rgba(255, 152, 0, 0.15)' 
+                              : 'rgba(63, 81, 181, 0.15)',
+                            border: '1px solid',
+                            borderColor: table.status === 'occupied' 
+                              ? 'warning.main' 
+                              : 'primary.main',
+                          }}
+                        >
+                          <LinkIcon 
+                            fontSize="small" 
+                            sx={{ 
+                              mr: 1, 
+                              color: table.status === 'occupied' 
+                                ? theme.palette.warning.main 
+                                : theme.palette.primary.main 
+                            }} 
+                          />
+                          <Typography 
+                            variant="caption" 
+                            sx={{ 
+                              fontWeight: 'medium',
+                              color: table.status === 'occupied' 
+                                ? theme.palette.warning.main 
+                                : theme.palette.primary.main
+                            }}
+                          >
+                            {table.isJoined 
+                              ? `Mesa Principal (${table.joinedWith?.length || 0} unidas)` 
+                              : 'Mesa Secundária'}
+                          </Typography>
+                        </Box>
+                      )}
+                      
+                      {table.isJoined && table.joinedWith && table.joinedWith.length > 0 && (
+                        <Box sx={{ 
+                          mt: 1,
+                          px: 1.5,
+                          py: 0.5,
+                          borderRadius: 1,
+                          bgcolor: 'rgba(0,0,0,0.1)',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center'
+                        }}>
+                          <Typography variant="caption" color="textSecondary" sx={{ opacity: 0.9, fontWeight: 'medium' }}>
+                            Mesa unida com:
+                          </Typography>
+                          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, justifyContent: 'center', mt: 0.5 }}>
+                            {(Array.isArray(table.joinedWith) ? table.joinedWith : []).map(joinedTable => {
+                              // Pode ser um objeto já populado ou apenas um ID
+                              const tableId = typeof joinedTable === 'object' ? joinedTable._id : joinedTable;
+                              const tableNumber = typeof joinedTable === 'object' 
+                                ? joinedTable.tableNumber 
+                                : tables.find(t => t._id === tableId)?.tableNumber;
+                              
+                              return tableNumber ? (
+                                <Chip 
+                                  key={tableId}
+                                  label={tableNumber}
+                                  size="small"
+                                  variant="outlined"
+                                  sx={{ 
+                                    height: 20, 
+                                    fontSize: '0.7rem',
+                                    borderColor: table.status === 'occupied' ? 'warning.main' : 'primary.main',
+                                    color: table.status === 'occupied' ? 'warning.main' : 'primary.main',
+                                  }}
+                                />
+                              ) : null;
+                            })}
+                          </Box>
+                        </Box>
+                      )}
+                      
                       {table.status === 'occupied' && (
                         <Box sx={{ display: 'flex', alignItems: 'center' }}>
                           <ReceiptIcon fontSize="small" sx={{ mr: 0.5, color: theme.palette.text.secondary }} />
                           <Typography variant="body2" color="text.secondary">
                             {getOrderCount(table._id)} pedidos
+                          </Typography>
+                        </Box>
+                      )}
+                      
+                      {/* Texto alternativo quando a mesa faz parte de uma união */}
+                      {table.isVirtual && table.parentTable && (
+                        <Box sx={{ 
+                          display: 'flex', 
+                          alignItems: 'center', 
+                          mb: 1,
+                          px: 1,
+                          py: 0.5,
+                          borderRadius: 1,
+                          bgcolor: 'rgba(0,0,0,0.1)'
+                        }}>
+                          <LinkIcon fontSize="small" sx={{ 
+                            mr: 0.5, 
+                            color: table.status === 'occupied' 
+                              ? theme.palette.warning.main 
+                              : theme.palette.primary.main 
+                          }} />
+                          <Typography variant="body2" fontWeight="medium" color={
+                            table.status === 'occupied' 
+                              ? theme.palette.warning.main 
+                              : theme.palette.primary.main
+                          }>
+                            {/* Usar objeto parentTable se estiver populado ou procurar pelo ID se não estiver */}
+                            Parte da Mesa {
+                              typeof table.parentTable === 'object' && table.parentTable 
+                                ? table.parentTable.tableNumber 
+                                : tables.find(t => t._id === (
+                                    typeof table.parentTable === 'string' 
+                                      ? table.parentTable 
+                                      : table.parentTable?._id
+                                  ))?.tableNumber || '?'
+                            }
                           </Typography>
                         </Box>
                       )}
@@ -295,7 +636,6 @@ const WaiterDashboard = () => {
         ))
       )}
       
-      {/* Recent Order Notifications */}
       <Paper elevation={1} sx={{ p: 2, mt: 3 }}>
         <Typography variant="h6" gutterBottom>
           Notificações Recentes

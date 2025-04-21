@@ -17,7 +17,11 @@ import {
   Select,
   MenuItem,
   CircularProgress,
-  Alert
+  Alert,
+  ListItemText,
+  Checkbox,
+  Tooltip,
+  Badge
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
@@ -25,9 +29,38 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import TableRestaurantIcon from '@mui/icons-material/TableRestaurant';
 import PeopleIcon from '@mui/icons-material/People';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
+import LinkIcon from '@mui/icons-material/Link';
+import LinkOffIcon from '@mui/icons-material/LinkOff';
+import { keyframes } from '@emotion/react';
 import axios from 'axios';
 import { useLocation } from 'react-router-dom';
 import AppLayout from '../../components/layout/AppLayout';
+
+// Definir animações para as mesas unidas
+const pulseBorder = keyframes`
+  0% {
+    box-shadow: 0 0 0 0 rgba(63, 81, 181, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(63, 81, 181, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(63, 81, 181, 0);
+  }
+`;
+
+// Animação de padrão de onda para mesas unidas
+const waveAnimation = keyframes`
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+`;
 
 const TablesLayout = () => {
   const location = useLocation();
@@ -60,6 +93,11 @@ const TablesLayout = () => {
     open: false,
     table: null
   });
+  
+  // State para selecionar mesas para unir
+  const [joiningTables, setJoiningTables] = useState(false);
+  const [selectedTables, setSelectedTables] = useState([]);
+  const [joinDialogOpen, setJoinDialogOpen] = useState(false);
   
   // Fetch tables data
   useEffect(() => {
@@ -392,6 +430,107 @@ const TablesLayout = () => {
     }
   };
   
+  // Função para iniciar a seleção de mesas para unir
+  const startTableJoining = () => {
+    setJoiningTables(true);
+    setSelectedTables([]);
+  };
+  
+  // Função para cancelar a seleção de mesas
+  const cancelTableJoining = () => {
+    setJoiningTables(false);
+    setSelectedTables([]);
+  };
+  
+  // Função para alternar a seleção de uma mesa
+  const toggleTableSelection = (tableId) => {
+    // Verificar se a mesa já está selecionada
+    if (selectedTables.includes(tableId)) {
+      setSelectedTables(selectedTables.filter(id => id !== tableId));
+    } else {
+      setSelectedTables([...selectedTables, tableId]);
+    }
+  };
+  
+  // Função para abrir o diálogo de confirmação de união
+  const openJoinConfirmDialog = () => {
+    if (selectedTables.length < 2) {
+      setError('Selecione pelo menos 2 mesas para unir.');
+      return;
+    }
+    
+    setJoinDialogOpen(true);
+  };
+  
+  // Função para unir as mesas
+  const joinTables = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      setSuccess(null);
+      
+      // Chamar a API para unir as mesas
+      const response = await axios.post('/api/tables/join', {
+        tableIds: selectedTables
+      });
+      
+      // Atualizar o estado local com a nova mesa principal e mesas virtuais
+      const updatedTables = tables.map(table => {
+        // Se for a mesa principal
+        if (selectedTables[0] === table._id) {
+          return response.data.mainTable;
+        }
+        // Se for uma mesa secundária (agora virtual)
+        else if (selectedTables.includes(table._id)) {
+          return { ...table, isVirtual: true, parentTable: selectedTables[0] };
+        }
+        // Qualquer outra mesa permanece inalterada
+        return table;
+      });
+      
+      setTables(updatedTables);
+      setSuccess('Mesas unidas com sucesso!');
+      
+      // Resetar o estado de seleção
+      setJoiningTables(false);
+      setSelectedTables([]);
+      setJoinDialogOpen(false);
+    } catch (err) {
+      console.error('Error joining tables:', err);
+      setError(err.response?.data?.message || 'Erro ao unir mesas. Verifique se todas estão disponíveis.');
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // Função para separar mesas
+  const unjoinTables = async (mainTableId) => {
+    try {
+      setLoading(true);
+      setError(null);
+      setSuccess(null);
+      
+      // Chamar a API para separar as mesas
+      const response = await axios.post(`/api/tables/unjoin/${mainTableId}`);
+      
+      // Atualizar o estado local com as mesas atualizadas
+      const unjoined = response.data.tables;
+      
+      // Atualizar o estado local
+      setTables(tables.map(table => {
+        const updated = unjoined.find(t => t._id === table._id);
+        return updated || table;
+      }));
+      
+      setSuccess('Mesas separadas com sucesso!');
+    } catch (err) {
+      console.error('Error unjoining tables:', err);
+      setError(err.response?.data?.message || 'Erro ao separar mesas.');
+    } finally {
+      setLoading(false);
+    }
+  };
+  
   // Handle delete confirmation
   const handleDeleteConfirm = async () => {
     try {
@@ -438,23 +577,32 @@ const TablesLayout = () => {
   };
 
   // Find the size scale factor based on capacity
-  const getTableSizeByCapacity = (capacity) => {
+  const getTableSizeByCapacity = (capacity, isJoined = false) => {
     // Base size for tables with capacity up to 4
     const baseSize = 100;
     
-    // Width is always the same
-    const width = baseSize;
-    
-    // Height depends on capacity:
-    // 1-4 pessoas: 1 unidade (mesa quadrada)
-    // 5-8 pessoas: 2 unidades (mesa retangular vertical)
-    // 9+ pessoas: 3 unidades (mesa retangular vertical maior)
+    let width = baseSize;
     let height = baseSize;
     
-    if (capacity > 4 && capacity <= 8) {
-      height = baseSize * 2; // Mesa 1x2 vertical
-    } else if (capacity > 8) {
-      height = baseSize * 3; // Mesa 1x3 vertical
+    if (isJoined) {
+      // Mesas unidas crescem horizontalmente em vez de verticalmente
+      // Isso evita sobreposição com outras mesas abaixo
+      if (capacity > 4 && capacity <= 8) {
+        width = baseSize * 2; // Mesa 2x1 horizontal
+      } else if (capacity > 8 && capacity <= 12) {
+        width = baseSize * 3; // Mesa 3x1 horizontal
+      } else if (capacity > 12) {
+        // Para mesas muito grandes, use layout 2x2
+        width = baseSize * 2;
+        height = baseSize * 2;
+      }
+    } else {
+      // Mesas normais (não unidas) seguem o padrão original
+      if (capacity > 4 && capacity <= 8) {
+        height = baseSize * 2; // Mesa 1x2 vertical
+      } else if (capacity > 8) {
+        height = baseSize * 3; // Mesa 1x3 vertical
+      }
     }
     
     return { width, height };
@@ -554,6 +702,35 @@ const TablesLayout = () => {
               >
                 Reorganizar Mesas
               </Button>
+              {joiningTables ? (
+                <>
+                  <Button 
+                    variant="contained" 
+                    color="primary" 
+                    onClick={openJoinConfirmDialog}
+                    disabled={selectedTables.length < 2}
+                    startIcon={<LinkIcon />}
+                  >
+                    Unir ({selectedTables.length})
+                  </Button>
+                  <Button 
+                    variant="outlined" 
+                    color="error" 
+                    onClick={cancelTableJoining}
+                  >
+                    Cancelar
+                  </Button>
+                </>
+              ) : (
+                <Button 
+                  variant="outlined" 
+                  color="primary" 
+                  onClick={startTableJoining}
+                  startIcon={<LinkIcon />}
+                >
+                  Juntar Mesas
+                </Button>
+              )}
             </Box>
           </Grid>
         </Grid>
@@ -630,11 +807,14 @@ const TablesLayout = () => {
           >
             {/* Tables */}
             {sectionTables.map((table) => {
-              // Calculate table size based on capacity
-              const { width, height } = getTableSizeByCapacity(table.capacity);
+              // Calculate table size based on capacity and joined status
+              const { width, height } = getTableSizeByCapacity(table.capacity, table.isJoined);
               
               // Use position from the table data
               const position = table.position || { x: 0, y: 0 };
+              
+              // Determinar a quantidade de mesas unidas para mostrar no badge
+              const joinedCount = table.isJoined && table.joinedWith ? table.joinedWith.length + 1 : 0;
               
               return (
                 <Box
@@ -645,27 +825,150 @@ const TablesLayout = () => {
                     top: `${position?.y * gridSize}px`,
                     width: width,
                     height: height,
-                    display: 'flex',
+                    display: table.isVirtual ? 'none' : 'flex', // Esconde mesas virtuais, mas mantém o status sincronizado
                     flexDirection: 'column',
                     justifyContent: 'center',
                     alignItems: 'center',
-                    borderRadius: '4px', // Mesa quadrada com cantos levemente arredondados
+                    borderRadius: '8px',
                     backgroundColor: getTableStatusClass(table.status),
                     color: '#fff',
                     boxShadow: '0 4px 10px rgba(0,0,0,0.15)',
                     transition: 'all 0.3s ease',
-                    border: '2px solid rgba(255,255,255,0.8)',
-                    overflow: 'hidden'
+                    border: selectedTables.includes(table._id) 
+                      ? '3px solid #f50057' 
+                      : table.isJoined 
+                        ? '3px solid #3f51b5' 
+                        : '2px solid rgba(255,255,255,0.8)',
+                    overflow: 'hidden',
+                    cursor: joiningTables && !table.isJoined && !table.isVirtual && table.status === 'available'
+                      ? 'pointer' 
+                      : 'default',
+                    opacity: joiningTables && (table.isJoined || table.isVirtual || table.status !== 'available') 
+                      ? 0.6 
+                      : 1,
+                    zIndex: selectedTables.includes(table._id) ? 10 : 1,
+                    // Efeitos visuais para mesas unidas
+                    ...(table.isJoined && {
+                      backgroundImage: 
+                        'linear-gradient(90deg, rgba(63,81,181,0.1) 50%, rgba(63,81,181,0.2) 50%)',
+                      backgroundSize: '20px 100%',
+                      animation: `${waveAnimation} 20s linear infinite, ${pulseBorder} 2s infinite`,
+                      boxShadow: '0 0 15px rgba(63,81,181,0.5)'
+                    }),
+                    ...(joiningTables && !table.isJoined && !table.isVirtual && table.status === 'available' && {
+                      '&:hover': {
+                        transform: 'translateY(-2px)',
+                        boxShadow: '0 6px 15px rgba(0,0,0,0.2)',
+                      }
+                    }),
+                    '&::before': table.isJoined ? {
+                      content: '""',
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      borderRadius: '6px',
+                      border: '2px dashed rgba(255,255,255,0.4)',
+                      pointerEvents: 'none'
+                    } : {}
                   }}
+                  onClick={() => joiningTables && !table.isJoined && !table.isVirtual && table.status === 'available'
+                    ? toggleTableSelection(table._id)
+                    : null
+                  }
                 >
+                  {/* Ícones de conexão nas bordas para mesas unidas (visual de expandido) */}
+                  {table.isJoined && table.joinedWith && table.joinedWith.length > 0 && (
+                    <>
+                      {/* Indicadores de conexão nas bordas */}
+                      <Box sx={{
+                        position: 'absolute',
+                        top: -5,
+                        left: width / 2 - 8,
+                        width: 16,
+                        height: 10,
+                        bgcolor: 'primary.main',
+                        borderRadius: '5px 5px 0 0'
+                      }} />
+                      <Box sx={{
+                        position: 'absolute',
+                        bottom: -5,
+                        left: width / 2 - 8,
+                        width: 16,
+                        height: 10,
+                        bgcolor: 'primary.main',
+                        borderRadius: '0 0 5px 5px'
+                      }} />
+                      <Box sx={{
+                        position: 'absolute',
+                        left: -5,
+                        top: height / 2 - 8,
+                        width: 10,
+                        height: 16,
+                        bgcolor: 'primary.main',
+                        borderRadius: '5px 0 0 5px'
+                      }} />
+                      <Box sx={{
+                        position: 'absolute',
+                        right: -5,
+                        top: height / 2 - 8,
+                        width: 10,
+                        height: 16,
+                        bgcolor: 'primary.main',
+                        borderRadius: '0 5px 5px 0'
+                      }} />
+                    </>
+                  )}
+                  
+                  {/* Indicador de mesas unidas */}
+                  {table.isJoined && (
+                    <Badge
+                      badgeContent={joinedCount}
+                      color="primary"
+                      sx={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        transform: 'translate(-30%, -30%)',
+                        '& .MuiBadge-badge': {
+                          fontSize: '0.8rem',
+                          height: 22,
+                          minWidth: 22
+                        }
+                      }}
+                    >
+                      <Box sx={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bgcolor: 'primary.main',
+                        color: 'white',
+                        py: 0.5,
+                        px: 1,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 0.5,
+                        width: '100%'
+                      }}>
+                        <LinkIcon fontSize="small" />
+                        <Typography variant="caption" sx={{ fontWeight: 'bold' }}>
+                          Mesa Unida
+                        </Typography>
+                      </Box>
+                    </Badge>
+                  )}
+                  
                   {/* Indicação de Pessoas */}
                   <Box sx={{
                     position: 'absolute',
-                    top: 5,
+                    top: table.isJoined ? 30 : 5,
                     right: 5,
                     display: 'flex',
                     alignItems: 'center',
-                    bgcolor: 'rgba(0,0,0,0.3)',
+                    bgcolor: 'rgba(0,0,0,0.2)',
                     borderRadius: 10,
                     px: 1,
                     py: 0.2
@@ -680,46 +983,55 @@ const TablesLayout = () => {
                   <Typography 
                     variant="h5" 
                     sx={{ 
-                      fontWeight: 'bold'
+                      fontWeight: 'bold',
+                      mt: table.isJoined ? 3 : 0
                     }}
                   >
                     Mesa {table.tableNumber}
                   </Typography>
                   
-                  {/* Visualização de cadeiras para mesas maiores */}
-                  {table.capacity > 4 && (
+                  {/* Exibir mesas unidas se houver */}
+                  {table.isJoined && table.joinedWith && table.joinedWith.length > 0 && (
                     <Box sx={{ 
-                      display: 'flex', 
-                      flexDirection: 'column',
-                      height: '70%',
-                      justifyContent: 'space-around',
-                      mt: 2
+                      mt: 1, 
+                      px: 1, 
+                      py: 0.5, 
+                      borderRadius: 1, 
+                      bgcolor: 'rgba(255,255,255,0.2)',
+                      maxWidth: '90%'
                     }}>
-                      {[...Array(Math.min(Math.ceil(table.capacity/2), 6))].map((_, i) => (
-                        <PeopleIcon key={i} sx={{ fontSize: 20, opacity: 0.7 }} />
-                      ))}
+                      <Typography variant="caption" sx={{ fontWeight: 'medium' }}>
+                        Com: {table.joinedWith.map(t => 
+                          typeof t === 'object' ? t.tableNumber : '?'
+                        ).join(', ')}
+                      </Typography>
                     </Box>
                   )}
-
-                  {/* Status label */}
-                  <Box sx={{ 
-                    position: 'absolute',
-                    top: -20,
-                    left: '50%',
-                    transform: 'translateX(-50%)',
-                    backgroundColor: table.status === 'occupied' ? 'warning.main' :
-                                    table.status === 'reserved' ? 'info.main' : 'success.main',
-                    color: 'white',
-                    fontSize: '0.7rem',
-                    fontWeight: 'bold',
-                    borderRadius: 10,
-                    px: 1,
-                    py: 0.2,
-                    opacity: table.status !== 'available' ? 1 : 0
-                  }}>
-                    {table.status === 'occupied' ? 'OCUPADA' :
-                     table.status === 'reserved' ? 'RESERVADA' : ''}
-                  </Box>
+                  
+                  {/* Botão para desfazer união (mostrado apenas na versão admin) */}
+                  {table.isJoined && !joiningTables && (
+                    <Tooltip title="Separar Mesas">
+                      <IconButton 
+                        size="small" 
+                        sx={{ 
+                          position: 'absolute', 
+                          bottom: 5, 
+                          right: 5,
+                          bgcolor: 'rgba(0,0,0,0.2)',
+                          color: 'white',
+                          '&:hover': {
+                            bgcolor: 'rgba(255,255,255,0.3)',
+                          }
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          unjoinTables(table._id);
+                        }}
+                      >
+                        <LinkOffIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  )}
                   
                   {/* Action buttons */}
                   <Box sx={{ 
@@ -797,6 +1109,22 @@ const TablesLayout = () => {
             }} />
             <Typography variant="body2">
               Reservada
+            </Typography>
+          </Box>
+          
+          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+            <Box sx={{ 
+              width: 16, 
+              height: 16, 
+              bgcolor: 'primary.main',
+              backgroundImage: 'linear-gradient(90deg, rgba(63,81,181,0.7) 50%, rgba(63,81,181,0.9) 50%)',
+              backgroundSize: '6px 100%',
+              borderRadius: 1,
+              mr: 1, 
+              border: '1px solid rgba(63,81,181,0.5)'
+            }} />
+            <Typography variant="body2">
+              Mesa Unida
             </Typography>
           </Box>
         </Box>
@@ -1067,6 +1395,100 @@ const TablesLayout = () => {
             startIcon={loading ? <CircularProgress size={20} /> : null}
           >
             Remover
+          </Button>
+        </DialogActions>
+      </Dialog>
+      
+      {/* Join Tables Confirmation Dialog */}
+      <Dialog 
+        open={joinDialogOpen} 
+        onClose={() => setJoinDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{
+          sx: {
+            borderRadius: 2,
+            boxShadow: 24
+          }
+        }}
+      >
+        <Box sx={{ 
+          p: 2, 
+          bgcolor: 'primary.main', 
+          color: 'white',
+          borderTopLeftRadius: 8,
+          borderTopRightRadius: 8,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 1
+        }}>
+          <LinkIcon />
+          <Typography variant="h6" sx={{ fontWeight: 'medium' }}>
+            Unir Mesas
+          </Typography>
+        </Box>
+        
+        <DialogContent sx={{ py: 3 }}>
+          <Typography variant="body1" paragraph>
+            Você está prestes a unir <strong>{selectedTables.length}</strong> mesas. Isso criará uma única mesa com capacidade ampliada.
+          </Typography>
+          
+          <Box sx={{ 
+            p: 2, 
+            bgcolor: 'primary.light', 
+            borderRadius: 2, 
+            my: 2,
+            color: 'primary.dark'
+          }}>
+            <Typography variant="subtitle2" gutterBottom sx={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 1 }}>
+              <LinkIcon fontSize="small" /> Detalhes da união:
+            </Typography>
+            
+            <Box component="ul" sx={{ pl: 2, mt: 1, mb: 0 }}>
+              <Box component="li">
+                Mesas selecionadas: {selectedTables.map(tableId => {
+                  const table = tables.find(t => t._id === tableId);
+                  return table ? `#${table.tableNumber}` : '';
+                }).filter(Boolean).join(', ')}
+              </Box>
+              <Box component="li">
+                Capacidade total: {selectedTables.reduce((acc, tableId) => {
+                  const table = tables.find(t => t._id === tableId);
+                  return acc + (table ? table.capacity : 0);
+                }, 0)} pessoas
+              </Box>
+              <Box component="li">
+                Mesa principal: {(() => {
+                  const mainTable = tables.find(t => t._id === selectedTables[0]);
+                  return mainTable ? `#${mainTable.tableNumber}` : 'N/A';
+                })()}
+              </Box>
+            </Box>
+          </Box>
+          
+          <Typography variant="body2" color="text.secondary">
+            Após unir as mesas, elas funcionarão como uma única entidade. Você pode separar as mesas a qualquer momento usando o botão nas configurações da mesa.
+          </Typography>
+        </DialogContent>
+        
+        <DialogActions sx={{ p: 2, pb: 3 }}>
+          <Button 
+            onClick={() => setJoinDialogOpen(false)} 
+            color="inherit"
+            variant="outlined"
+            sx={{ borderRadius: 2 }}
+          >
+            Cancelar
+          </Button>
+          <Button 
+            variant="contained" 
+            color="primary"
+            onClick={joinTables}
+            disabled={loading}
+            startIcon={loading ? <CircularProgress size={20} /> : <LinkIcon />}
+            sx={{ borderRadius: 2 }}
+          >
+            Confirmar União
           </Button>
         </DialogActions>
       </Dialog>

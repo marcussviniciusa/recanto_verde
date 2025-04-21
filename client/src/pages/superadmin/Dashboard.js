@@ -230,46 +230,41 @@ const SuperAdminDashboard = () => {
         
         {/* Orders Status */}
         <Grid item xs={12} sm={6} md={3}>
-          <Paper
-            elevation={2}
-            sx={{
-              p: 3,
-              display: 'flex',
-              flexDirection: 'column',
-              borderLeft: '4px solid',
-              borderColor: 'secondary.main',
-            }}
-          >
-            <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+          <Paper elevation={2} sx={{ 
+            bgcolor: 'secondary.light', 
+            color: 'secondary.dark',
+            height: '100%',
+            display: 'flex',
+            flexDirection: 'column'
+          }}>
+            <Box sx={{ p: 3, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <Box>
-                <Typography variant="subtitle2" color="text.secondary">
-                  Pedidos Hoje
-                </Typography>
-                <Typography variant="h4" component="div" sx={{ fontWeight: 'bold', mt: 1 }}>
-                  {dashboardData?.orders.today || 0}
-                </Typography>
+                <Typography variant="subtitle2">Pedidos Hoje</Typography>
+                <Typography variant="h4">{dashboardData?.orders.today || 0}</Typography>
               </Box>
-              <Box 
-                sx={{ 
-                  bgcolor: 'secondary.light',
-                  color: 'secondary.dark',
-                  p: 1,
-                  borderRadius: 1,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  width: 40,
-                  height: 40,
-                }}
-              >
-                <ReceiptIcon />
+              <Box sx={{ 
+                bgcolor: 'secondary.main', 
+                color: 'white',
+                p: 1.5,
+                borderRadius: 2,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}>
+                <ReceiptIcon fontSize="large" />
               </Box>
             </Box>
-            <Box sx={{ display: 'flex', mt: 2 }}>
-              <Typography variant="body2" color="info.main" sx={{ mr: 2 }}>
+            <Box sx={{ 
+              bgcolor: 'background.paper', 
+              p: 2.5,
+              mt: 'auto',
+              borderBottomLeftRadius: 8,
+              borderBottomRightRadius: 8
+            }}>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
                 {dashboardData?.orders.active || 0} ativos
               </Typography>
-              <Typography variant="body2" color="success.main">
+              <Typography variant="body2" color="text.secondary">
                 {dashboardData?.orders.completed || 0} completos
               </Typography>
             </Box>

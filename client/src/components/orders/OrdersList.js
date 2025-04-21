@@ -163,10 +163,12 @@ const OrdersList = ({ orders = [] }) => {
                     {order.items.length} {order.items.length === 1 ? 'item' : 'itens'} • R$ {order.totalAmount.toFixed(2)}
                   </Typography>
                   <Box sx={{ display: 'flex', alignItems: 'center', mt: 0.5 }}>
-                    <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center' }}>
+                    <Box display="flex" alignItems="center">
                       <RestaurantIcon fontSize="inherit" sx={{ mr: 0.5 }} />
-                      {formatTime(order.createdAt)} ({getTimeElapsed(order.createdAt)})
-                    </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {formatTime(order.createdAt)} ({getTimeElapsed(order.createdAt)})
+                      </Typography>
+                    </Box>
                     {order.waiter && (
                       <Typography variant="caption" color="text.secondary" sx={{ ml: 2 }}>
                         Garçom: {order.waiter.name}

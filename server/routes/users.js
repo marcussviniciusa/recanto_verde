@@ -130,8 +130,8 @@ router.delete('/:id/permanent', protect, authorize('superadmin'), async (req, re
 
 // @route   GET /api/users/waiters
 // @desc    Get all active waiters
-// @access  Private/Superadmin
-router.get('/role/waiters', protect, authorize('superadmin'), async (req, res) => {
+// @access  Private (both superadmin and waiters)
+router.get('/role/waiters', protect, async (req, res) => {
   try {
     const waiters = await User.find({ 
       role: 'waiter', 

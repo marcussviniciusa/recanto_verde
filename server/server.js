@@ -27,6 +27,9 @@ const io = socketIo(server, {
   cookie: false
 });
 
+// Tornar o objeto io acessível para as rotas
+app.set('io', io);
+
 // Middleware
 app.use(cors());
 app.use(express.json());
@@ -53,6 +56,14 @@ io.on('connection', (socket) => {
   // Update tables status
   socket.on('updateTable', (data) => {
     io.to('superadmin').emit('tableUpdated', data);
+    io.to('waiter').emit('tableUpdated', data); // Também notificar garçons
+  });
+  
+  // Específico para mudanças de status de mesa
+  socket.on('tableStatusChange', (data) => {
+    console.log('Table status change event received:', data);
+    io.to('superadmin').emit('tableStatusChanged', data);
+    io.to('waiter').emit('tableStatusChanged', data);
   });
   
   // New order notification
@@ -63,6 +74,13 @@ io.on('connection', (socket) => {
   // Order ready notification
   socket.on('orderReady', (data) => {
     io.to('waiter').emit('readyNotification', data);
+  });
+  
+  // Payment request notification
+  socket.on('requestPayment', (data) => {
+    console.log('Payment request received:', data);
+    io.to('superadmin').emit('paymentRequestNotification', data);
+    io.to('waiter').emit('paymentRequestNotification', data);
   });
   
   socket.on('disconnect', (reason) => {

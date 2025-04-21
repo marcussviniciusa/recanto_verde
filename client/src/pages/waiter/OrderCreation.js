@@ -501,9 +501,9 @@ const OrderCreation = () => {
                               >
                                 <RemoveCircleIcon fontSize="small" />
                               </IconButton>
-                              <Typography sx={{ mx: 1 }}>
+                              <Box component="span" sx={{ mx: 1 }}>
                                 {item.quantity}
-                              </Typography>
+                              </Box>
                               <IconButton 
                                 size="small" 
                                 onClick={() => handleAddItem(menuItems.find(mi => mi._id === item.menuItemId))}
