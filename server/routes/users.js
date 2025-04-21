@@ -90,6 +90,44 @@ router.delete('/:id', protect, authorize('superadmin'), async (req, res) => {
   }
 });
 
+// @route   DELETE /api/users/:id/permanent
+// @desc    Permanently delete user
+// @access  Private/Superadmin
+router.delete('/:id/permanent', protect, authorize('superadmin'), async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    
+    if (!user) {
+      return res.status(404).json({ message: 'Usuário não encontrado' });
+    }
+    
+    // Check if user is a superadmin - prevent deletion of superadmins
+    if (user.role === 'superadmin') {
+      return res.status(403).json({ 
+        message: 'Não é possível excluir permanentemente um administrador'
+      });
+    }
+    
+    // Check if user has associated orders
+    const Order = require('../models/Order');
+    const hasOrders = await Order.exists({ assignedWaiter: user._id });
+    
+    if (hasOrders) {
+      return res.status(400).json({ 
+        message: 'Não é possível excluir um usuário que tem pedidos associados'
+      });
+    }
+    
+    // Permanently delete the user
+    await User.deleteOne({ _id: user._id });
+    
+    res.json({ message: 'Usuário excluído permanentemente com sucesso' });
+  } catch (error) {
+    console.error('Permanent delete user error:', error);
+    res.status(500).json({ message: 'Erro no servidor' });
+  }
+});
+
 // @route   GET /api/users/waiters
 // @desc    Get all active waiters
 // @access  Private/Superadmin

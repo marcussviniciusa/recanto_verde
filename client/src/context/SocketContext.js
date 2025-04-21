@@ -29,7 +29,11 @@ export function SocketProvider({ children }) {
     const socketInstance = io(process.env.REACT_APP_SOCKET_URL || '', {
       auth: {
         token: localStorage.getItem('token')
-      }
+      },
+      transports: ['websocket'],
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000
     });
 
     socketInstance.on('connect', () => {
@@ -86,7 +90,7 @@ export function SocketProvider({ children }) {
         socketInstance.disconnect();
       }
     };
-  }, [user]);
+  }, [user]); 
 
   // Add notification
   const addNotification = (notification) => {

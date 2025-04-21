@@ -20,7 +20,11 @@ const io = socketIo(server, {
   cors: {
     origin: '*',
     methods: ['GET', 'POST']
-  }
+  },
+  transports: ['websocket'],
+  pingTimeout: 60000,
+  pingInterval: 25000,
+  cookie: false
 });
 
 // Middleware
@@ -38,11 +42,12 @@ app.use('/api/dashboard', dashboardRoutes);
 
 // Socket.io connection
 io.on('connection', (socket) => {
-  console.log('New client connected');
+  console.log('New client connected:', socket.id);
   
   // Join a room based on user role
   socket.on('join', (room) => {
     socket.join(room);
+    console.log(`Socket ${socket.id} joined room: ${room}`);
   });
   
   // Update tables status
@@ -60,8 +65,8 @@ io.on('connection', (socket) => {
     io.to('waiter').emit('readyNotification', data);
   });
   
-  socket.on('disconnect', () => {
-    console.log('Client disconnected');
+  socket.on('disconnect', (reason) => {
+    console.log(`Client disconnected (${socket.id}): ${reason}`);
   });
 });
 

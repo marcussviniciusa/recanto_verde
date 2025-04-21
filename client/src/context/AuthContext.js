@@ -81,9 +81,22 @@ export function AuthProvider({ children }) {
       return response.data;
     } catch (error) {
       console.error('Register error:', error);
-      const message = error.response?.data?.message || 'Erro ao registrar usuário';
-      setError(message);
-      throw new Error(message);
+      // Mensagem mais detalhada de erro
+      let errorMessage = 'Erro ao registrar usuário';
+      
+      if (error.response) {
+        // O servidor respondeu com um status de erro
+        errorMessage = error.response.data?.message || errorMessage;
+      } else if (error.request) {
+        // A requisição foi feita mas não houve resposta
+        errorMessage = 'Não foi possível conectar ao servidor';
+      } else if (error.message) {
+        // Erro durante a configuração da requisição
+        errorMessage = error.message;
+      }
+      
+      setError(errorMessage);
+      throw new Error(errorMessage);
     }
   };
 

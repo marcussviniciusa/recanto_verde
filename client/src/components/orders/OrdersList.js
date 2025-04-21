@@ -9,11 +9,9 @@ import {
   Divider,
   IconButton,
   Tooltip,
-  Paper,
 } from '@mui/material';
 import ReceiptIcon from '@mui/icons-material/Receipt';
 import RestaurantIcon from '@mui/icons-material/Restaurant';
-import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import { useNavigate } from 'react-router-dom';
 import { format, isToday } from 'date-fns';

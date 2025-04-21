@@ -129,7 +129,9 @@ router.delete('/:id', protect, authorize('superadmin'), async (req, res) => {
       return res.status(404).json({ message: 'Item do cardápio não encontrado' });
     }
     
-    await menuItem.remove();
+    // Correção: usando findByIdAndDelete em vez de .remove()
+    await MenuItem.findByIdAndDelete(req.params.id);
+    
     res.json({ message: 'Item do cardápio removido com sucesso' });
   } catch (error) {
     console.error('Delete menu item error:', error);

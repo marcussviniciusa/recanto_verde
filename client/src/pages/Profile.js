@@ -104,7 +104,7 @@ const Profile = () => {
       }
       
       // Call API to update profile
-      const response = await axios.put(`/api/users/profile`, updateData);
+      await axios.put(`/api/users/profile`, updateData);
       
       // Update success
       setSuccess('Perfil atualizado com sucesso');

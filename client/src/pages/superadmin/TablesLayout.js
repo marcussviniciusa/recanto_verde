@@ -17,17 +17,13 @@ import {
   Select,
   MenuItem,
   CircularProgress,
-  Alert,
-  Tooltip,
-  Divider,
-  Slider
+  Alert
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import TableRestaurantIcon from '@mui/icons-material/TableRestaurant';
 import PeopleIcon from '@mui/icons-material/People';
-import CloseIcon from '@mui/icons-material/Close';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import axios from 'axios';
 import { useLocation } from 'react-router-dom';
@@ -45,8 +41,7 @@ const TablesLayout = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
-  const [draggingTable, setDraggingTable] = useState(null);
-  const [gridSize, setGridSize] = useState(20); // Grid size in pixels
+  const gridSize = 25; // Tamanho fixo da grade em pixels
   
   // Table dialog state
   const [tableDialog, setTableDialog] = useState({
@@ -72,7 +67,38 @@ const TablesLayout = () => {
       try {
         setLoading(true);
         const response = await axios.get('/api/tables');
-        setTables(response.data);
+        
+        // Verifica se as mesas têm posições definidas, caso contrário reorganiza automaticamente
+        const receivedTables = response.data;
+        const needsReorganization = receivedTables.some(table => 
+          !table.position || table.position.x === undefined || table.position.y === undefined
+        );
+        
+        // Se houver mesas sem posição, aplicamos a reorganização antes de mostrar
+        if (needsReorganization) {
+          console.log('Algumas mesas não têm posições definidas, reorganizando automaticamente...');
+          
+          // Organiza por seções
+          const sections = [...new Set(receivedTables.map(table => table.section || 'main'))];
+          
+          // Reorganiza cada seção
+          let reorganizedTables = [...receivedTables];
+          for (const section of sections) {
+            reorganizedTables = reorganizeTables(reorganizedTables, section);
+          }
+          
+          // Salva no banco de dados
+          try {
+            // Atualiza as posições no servidor em massa
+            await axios.post('/api/tables/update-positions', { tables: reorganizedTables });
+            setTables(reorganizedTables);
+          } catch (err) {
+            console.error('Erro ao salvar posições reorganizadas:', err);
+            setTables(receivedTables); // Usa os dados originais em caso de erro
+          }
+        } else {
+          setTables(receivedTables);
+        }
         
         // Extract unique sections
         const uniqueSections = [...new Set(response.data.map(table => table.section || 'main'))];
@@ -110,39 +136,42 @@ const TablesLayout = () => {
       return { x: 5, y: 5 };
     }
     
-    // Find next available spot in a grid pattern
-    const usedPositions = new Set();
-    sectionTables.forEach(table => {
-      const pos = `${table.position?.x || 0},${table.position?.y || 0}`;
-      usedPositions.add(pos);
-    });
+    // Sort tables by tableNumber to maintain layout order
+    const sortedTables = [...sectionTables].sort((a, b) => a.tableNumber - b.tableNumber);
     
-    // Try to find a position in a grid-like pattern
-    const maxX = Math.max(...sectionTables.map(t => t.position?.x || 0)) + 3;
-    const maxY = Math.max(...sectionTables.map(t => t.position?.y || 0)) + 3;
+    // Define grid layout parameters
+    const gridColumns = 5; // Tables per row
+    const spacingX = 4; // Horizontal spacing between tables
+    const spacingY = 4; // Vertical spacing between tables
     
-    // Start with a 5x5 grid and expand outward
-    for (let y = 1; y <= maxY; y++) {
-      for (let x = 1; x <= maxX; x++) {
-        if (!usedPositions.has(`${x},${y}`)) {
-          return { x, y };
-        }
-      }
-    }
+    // Calculate next position based on the number of existing tables
+    const tableIndex = sortedTables.length;
+    const row = Math.floor(tableIndex / gridColumns);
+    const column = tableIndex % gridColumns;
     
-    // If all positions are taken, add to the right
-    return { x: maxX, y: 1 };
+    // Calculate position 
+    const x = 3 + (column * spacingX);
+    const y = 3 + (row * spacingY);
+    
+    return { x, y };
   };
   
-  // Handle adding a new table
-  const handleAddTable = () => {
-    // Find the next available table number
+  // Find the next available table number
+  const findNextTableNumber = () => {
     const tableNumbers = tables.map(table => table.tableNumber);
     let nextTableNumber = 1;
     
     while (tableNumbers.includes(nextTableNumber)) {
       nextTableNumber++;
     }
+    
+    return nextTableNumber;
+  };
+  
+  // Handle adding a new table
+  const handleAddTable = () => {
+    // Find the next available table number
+    const nextTableNumber = findNextTableNumber();
     
     // Generate automatic position
     const autoPosition = generateAutoPosition();
@@ -220,6 +249,10 @@ const TablesLayout = () => {
       
       if (isEdit) {
         // Update existing table
+        // Se a capacidade mudou, talvez precisemos ajustar a posição
+        const originalTable = tables.find(t => t._id === table._id);
+        const capacityChanged = originalTable && originalTable.capacity !== table.capacity;
+        
         response = await axios.put(`/api/tables/${table._id}`, table);
         
         // Update local state
@@ -233,7 +266,16 @@ const TablesLayout = () => {
         response = await axios.post('/api/tables', table);
         
         // Add to local state
-        setTables([...tables, response.data]);
+        setTables(prevTables => {
+          const newTables = [...prevTables, response.data];
+          
+          // Reorganizar as mesas se necessário
+          if (table.section === currentSection) {
+            return reorganizeTables(newTables, table.section);
+          }
+          
+          return newTables;
+        });
         
         setSuccess('Mesa adicionada com sucesso!');
       }
@@ -246,6 +288,105 @@ const TablesLayout = () => {
     } catch (err) {
       console.error('Error saving table:', err);
       setError('Erro ao salvar mesa. Tente novamente.');
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // Reorganiza as mesas em um layout organizado
+  const reorganizeTables = (allTables, section) => {
+    // Filtra e ordena as mesas da seção pelo número
+    const sectionTables = allTables
+      .filter(table => (table.section || 'main') === section)
+      .sort((a, b) => a.tableNumber - b.tableNumber);
+      
+    // Define parâmetros do grid - ajustando para ter espaço adequado entre mesas
+    const gridColumns = 4; // Reduzir para 4 mesas por linha para mais espaço
+    const spacingX = 5; // Aumentar espaçamento horizontal (em unidades de grade)
+    const spacingY = 5; // Aumentar espaçamento vertical (em unidades de grade)
+    const paddingGrid = 2; // Espaço adicional entre mesas (em pixels, convertido para unidades de grade)
+    
+    // Calcula o espaço adicional em unidades de grade baseado no gridSize
+    const additionalSpaceX = Math.ceil(paddingGrid / gridSize);
+    const additionalSpaceY = Math.ceil(paddingGrid / gridSize);
+    
+    // Reorganiza cada mesa
+    const reorganized = allTables.map(table => {
+      // Se a mesa não é da seção atual, mantenha como está
+      if ((table.section || 'main') !== section) {
+        return table;
+      }
+      
+      // Encontre o índice da mesa na lista ordenada
+      const index = sectionTables.findIndex(t => t._id === table._id);
+      if (index === -1) return table;
+      
+      // Calcule a nova posição
+      const row = Math.floor(index / gridColumns);
+      const column = index % gridColumns;
+      
+      // Obtenha as dimensões da mesa
+      const { width, height } = getTableSizeByCapacity(table.capacity);
+      
+      // Considere o tamanho de cada mesa ao calcular o posicionamento
+      // As coordenadas são ajustadas com base no tamanho da mesa
+      // e adicionando espaço extra entre as mesas
+      const x = 3 + (column * (spacingX + additionalSpaceX));
+      
+      // Cálculo vertical precisa considerar a altura da mesa
+      // Mesas maiores precisam de mais espaço
+      const heightUnits = Math.ceil(height / gridSize);
+      const y = 3 + (row * (Math.max(heightUnits, spacingY) + additionalSpaceY));
+      
+      // Retorne a mesa com nova posição
+      return {
+        ...table,
+        position: { x, y }
+      };
+    });
+    
+    return reorganized;
+  };
+  
+  // Botão para reorganizar todas as mesas da seção atual
+  const handleReorganizeTables = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // Reorganize tables in memory
+      const reorganized = reorganizeTables([...tables], currentSection);
+      
+      // Extract tables from the current section that need position updates
+      const updatedTables = reorganized
+        .filter(table => (table.section || 'main') === currentSection);
+      
+      // Update positions in the database - primeiro conjunto como array para o endpoint em massa
+      try {
+        // Tenta primeiro usar o endpoint de atualização em massa (mais eficiente)
+        await axios.post('/api/tables/update-positions', { tables: updatedTables });
+      } catch (err) {
+        console.log('Fallback para atualização individual');
+        // Fallback: atualiza mesa por mesa se o endpoint em massa falhar
+        const updatePromises = updatedTables.map(table => 
+          axios.put(`/api/tables/${table._id}`, table)
+        );
+        await Promise.all(updatePromises);
+      }
+      
+      // Update local state
+      setTables(prev => {
+        // Substitui apenas as mesas da seção atual, mantendo as outras inalteradas
+        return prev.map(table => {
+          const updated = reorganized.find(t => t._id === table._id);
+          return updated || table;
+        });
+      });
+      
+      setSuccess('Mesas reorganizadas com sucesso!');
+    } catch (err) {
+      console.error('Error reorganizing tables:', err);
+      setError('Erro ao reorganizar mesas. Tente novamente.');
     } finally {
       setLoading(false);
     }
@@ -282,296 +423,6 @@ const TablesLayout = () => {
   // Get tables for current section
   const sectionTables = tables.filter(table => (table.section || 'main') === currentSection);
   
-  // Handle drag start - Simplified and more reliable
-  const handleDragStart = (table, e) => {
-    // Prevent default behaviors
-    if (e.type === 'mousedown') {
-      e.preventDefault();
-    }
-    e.stopPropagation();
-    
-    // Get the correct client coordinates
-    const clientX = e.clientX || (e.touches && e.touches[0].clientX);
-    const clientY = e.clientY || (e.touches && e.touches[0].clientY);
-    
-    if (!clientX || !clientY) return; // Bail if we don't have coordinates
-    
-    // Calculate the initial mouse position
-    const startX = clientX;
-    const startY = clientY;
-    
-    // Get initial table position (with fallbacks)
-    const initialX = table.position?.x || 0;
-    const initialY = table.position?.y || 0;
-    
-    // Find other tables for collision detection
-    const otherTables = tables.filter(t => t._id !== table._id && t.section === table.section);
-    
-    // Set the table that's being dragged with all necessary metadata
-    setDraggingTable({
-      ...table,
-      _dragStartPos: {
-        startX,
-        startY,
-        initialX,
-        initialY
-      },
-      _otherTables: otherTables,
-      _isDragging: true
-    });
-    
-    // Update tables array with dragging status
-    setTables(prevTables => prevTables.map(t => 
-      t._id === table._id ? {
-        ...t,
-        _isDragging: true,
-        position: { x: initialX, y: initialY } // Ensure position is set
-      } : t
-    ));
-    
-    // Set up event listeners with delay to ensure state is updated
-    setTimeout(() => {
-      // Desktop events
-      document.addEventListener('mousemove', handleDragMove);
-      document.addEventListener('mouseup', handleDragEnd);
-      
-      // Mobile/touch events
-      document.addEventListener('touchmove', handleDragMove, { passive: false });
-      document.addEventListener('touchend', handleDragEnd);
-      document.addEventListener('touchcancel', handleDragEnd);
-    }, 0);
-  };
-  
-  // Handle drag movement - Simplified for better performance
-  const handleDragMove = (e) => {
-    if (!draggingTable || !draggingTable._dragStartPos) return;
-    
-    // Prevent scrolling on mobile
-    if (e.type === 'touchmove') {
-      e.preventDefault();
-    }
-    
-    // Get current cursor position (with proper touch support)
-    const clientX = e.clientX || (e.touches && e.touches[0].clientX);
-    const clientY = e.clientY || (e.touches && e.touches[0].clientY);
-    
-    if (!clientX || !clientY) return; // Safety check
-    
-    // Calculate grid-based movement
-    const deltaX = Math.round((clientX - draggingTable._dragStartPos.startX) / gridSize);
-    const deltaY = Math.round((clientY - draggingTable._dragStartPos.startY) / gridSize);
-    
-    // Calculate new position with minimum boundary
-    let newX = Math.max(0, draggingTable._dragStartPos.initialX + deltaX);
-    let newY = Math.max(0, draggingTable._dragStartPos.initialY + deltaY);
-    
-    // Collision detection
-    let hasCollision = false;
-    if (draggingTable._otherTables && draggingTable._otherTables.length > 0) {
-      const tableRadius = 2; // Space needed between tables
-      
-      // Check each other table
-      for (const otherTable of draggingTable._otherTables) {
-        if (!otherTable.position) continue;
-        
-        const otherX = otherTable.position.x || 0;
-        const otherY = otherTable.position.y || 0;
-        
-        // Calculate distance between tables
-        const distanceSquared = (
-          Math.pow(newX - otherX, 2) + 
-          Math.pow(newY - otherY, 2)
-        );
-        
-        // Using distanceSquared for performance (avoids square root)
-        if (distanceSquared < Math.pow(tableRadius * 2, 2)) {
-          hasCollision = true;
-          break;
-        }
-      }
-    }
-    
-    // Alignment snapping
-    let alignedToX = false;
-    let alignedToY = false;
-    
-    if (draggingTable._otherTables && !hasCollision) {
-      const alignmentThreshold = 1;
-      
-      draggingTable._otherTables.forEach(otherTable => {
-        if (!otherTable.position) return;
-        
-        const otherX = otherTable.position.x || 0;
-        const otherY = otherTable.position.y || 0;
-        
-        // Snap to X alignment (horizontal)
-        if (Math.abs(newX - otherX) < alignmentThreshold) {
-          newX = otherX;
-          alignedToX = true;
-        }
-        
-        // Snap to Y alignment (vertical)
-        if (Math.abs(newY - otherY) < alignmentThreshold) {
-          newY = otherY;
-          alignedToY = true;
-        }
-      });
-    }
-    
-    // Create new dragging table state
-    const updatedDraggingTable = {
-      ...draggingTable,
-      position: { x: newX, y: newY },
-      _hasCollision: hasCollision,
-      _alignedToX: alignedToX,
-      _alignedToY: alignedToY
-    };
-    
-    // Update states (optimized to avoid unnecessary re-renders)
-    setDraggingTable(updatedDraggingTable);
-    
-    // Update tables array
-    setTables(prevTables => prevTables.map(table => 
-      table._id === draggingTable._id ? {
-        ...table,
-        _isDragging: true,
-        _hasCollision: hasCollision,
-        _alignedToX: alignedToX,
-        _alignedToY: alignedToY,
-        position: { x: newX, y: newY }
-      } : table
-    ));
-  };
-  
-  // Handle drag end - Completely rewritten for reliability
-  const handleDragEnd = async () => {
-    // Safety check
-    if (!draggingTable) return;
-    
-    // Always remove event listeners first to prevent memory leaks
-    document.removeEventListener('mousemove', handleDragMove);
-    document.removeEventListener('mouseup', handleDragEnd);
-    document.removeEventListener('touchmove', handleDragMove);
-    document.removeEventListener('touchend', handleDragEnd);
-    document.removeEventListener('touchcancel', handleDragEnd);
-    
-    try {
-      // Store positions for later use
-      const originalPosition = {
-        x: draggingTable._dragStartPos?.initialX || 0,
-        y: draggingTable._dragStartPos?.initialY || 0
-      };
-      
-      const newPosition = {
-        x: draggingTable.position?.x || 0,
-        y: draggingTable.position?.y || 0
-      };
-      
-      // If collision detected, reset to original position
-      if (draggingTable._hasCollision) {
-        setError('Não é possível posicionar a mesa aqui pois há sobreposição com outra mesa.');
-        setTimeout(() => setError(null), 3000);
-        
-        // Reset position in local state
-        setTables(prevTables => prevTables.map(table => 
-          table._id === draggingTable._id ? {
-            ...table,
-            position: originalPosition,
-            _isDragging: false,
-            _hasCollision: false,
-            _alignedToX: false,
-            _alignedToY: false
-          } : table
-        ));
-        
-        // Clear dragging state
-        setDraggingTable(null);
-        return;
-      }
-      
-      // Check if position actually changed
-      const positionChanged = 
-        originalPosition.x !== newPosition.x || 
-        originalPosition.y !== newPosition.y;
-      
-      if (positionChanged) {
-        // Prepare clean table object for API
-        const tableToUpdate = {
-          _id: draggingTable._id,
-          tableNumber: draggingTable.tableNumber,
-          capacity: draggingTable.capacity,
-          section: draggingTable.section,
-          status: draggingTable.status,
-          position: newPosition
-        };
-        
-        // Send update to server
-        await axios.put(`/api/tables/${draggingTable._id}`, tableToUpdate);
-        
-        // Success feedback
-        setSuccess('Posição da mesa atualizada com sucesso');
-        setTimeout(() => setSuccess(null), 3000);
-      }
-      
-      // Clean up table states
-      setTables(prevTables => prevTables.map(table => {
-        // Create a clean copy without temporary properties
-        const cleanTable = {...table};
-        delete cleanTable._isDragging;
-        delete cleanTable._hasCollision;
-        delete cleanTable._alignedToX;
-        delete cleanTable._alignedToY;
-        delete cleanTable._dragStartPos;
-        
-        // Update dragged table with final position
-        return table._id === draggingTable._id ? {
-          ...cleanTable,
-          position: newPosition
-        } : cleanTable;
-      }));
-    } catch (err) {
-      console.error('Error updating table position:', err);
-      setError('Erro ao atualizar posição da mesa. Tente novamente.');
-      
-      // Reset to original position on error
-      if (draggingTable._dragStartPos) {
-        setTables(prevTables => prevTables.map(table => 
-          table._id === draggingTable._id ? {
-            ...table,
-            position: {
-              x: draggingTable._dragStartPos.initialX,
-              y: draggingTable._dragStartPos.initialY
-            },
-            _isDragging: false
-          } : table
-        ));
-      }
-    } finally {
-      // Always clear dragging state
-      setDraggingTable(null);
-    }
-  };
-  
-  // Handle grid click to position a table
-  const handleGridClick = (e) => {
-    if (draggingTable) {
-      const layoutEl = document.getElementById('table-layout');
-      const rect = layoutEl.getBoundingClientRect();
-      
-      // Calculate position based on click and grid size
-      const x = Math.floor((e.clientX - rect.left) / gridSize);
-      const y = Math.floor((e.clientY - rect.top) / gridSize);
-      
-      // Update dragging table position
-      const updatedTable = {
-        ...draggingTable,
-        position: { x, y }
-      };
-      
-      setDraggingTable(updatedTable);
-    }
-  };
-  
   // Get table status color class
   const getTableStatusClass = (status) => {
     switch (status) {
@@ -584,6 +435,29 @@ const TablesLayout = () => {
       default:
         return '#9e9e9e'; // Cinza
     }
+  };
+
+  // Find the size scale factor based on capacity
+  const getTableSizeByCapacity = (capacity) => {
+    // Base size for tables with capacity up to 4
+    const baseSize = 100;
+    
+    // Width is always the same
+    const width = baseSize;
+    
+    // Height depends on capacity:
+    // 1-4 pessoas: 1 unidade (mesa quadrada)
+    // 5-8 pessoas: 2 unidades (mesa retangular vertical)
+    // 9+ pessoas: 3 unidades (mesa retangular vertical maior)
+    let height = baseSize;
+    
+    if (capacity > 4 && capacity <= 8) {
+      height = baseSize * 2; // Mesa 1x2 vertical
+    } else if (capacity > 8) {
+      height = baseSize * 3; // Mesa 1x3 vertical
+    }
+    
+    return { width, height };
   };
 
   return (
@@ -651,7 +525,7 @@ const TablesLayout = () => {
         }}
       >
         <Grid container spacing={3} alignItems="center">
-          <Grid item xs={12} md={5}>
+          <Grid item xs={12} md={7}>
             <FormControl fullWidth variant="outlined">
               <InputLabel>Seção do Restaurante</InputLabel>
               <Select
@@ -669,29 +543,17 @@ const TablesLayout = () => {
             </FormControl>
           </Grid>
           
-          <Grid item xs={12} md={5}>
-            <Typography id="grid-size-slider" sx={{ fontWeight: 'medium', mb: 1 }}>
-              Tamanho da Grade: {gridSize}px
-            </Typography>
-            <Slider
-              value={gridSize}
-              onChange={(e, newValue) => setGridSize(newValue)}
-              aria-labelledby="grid-size-slider"
-              valueLabelDisplay="auto"
-              step={5}
-              marks
-              min={10}
-              max={50}
-              sx={{ color: 'primary.main' }}
-            />
-          </Grid>
-          
-          <Grid item xs={12} md={2} sx={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', bgcolor: 'info.light', p: 1, borderRadius: 1 }}>
-              <DragIndicatorIcon sx={{ mr: 1, color: 'info.dark' }} />
-              <Typography variant="body2" color="info.dark" sx={{ fontWeight: 'medium' }}>
-                Arraste para posicionar
-              </Typography>
+          <Grid item xs={12} md={5} sx={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              <Button
+                variant="contained"
+                startIcon={<DragIndicatorIcon />}
+                onClick={handleReorganizeTables}
+                size="medium"
+                color="primary"
+              >
+                Reorganizar Mesas
+              </Button>
             </Box>
           </Grid>
         </Grid>
@@ -760,21 +622,19 @@ const TablesLayout = () => {
               height: '100%',
               backgroundColor: '#ffffff',
               backgroundImage: `repeating-linear-gradient(0deg, transparent, transparent ${gridSize - 1}px, rgba(0,0,0,0.05) ${gridSize}px),
-                               repeating-linear-gradient(90deg, transparent, transparent ${gridSize - 1}px, rgba(0,0,0,0.05) ${gridSize}px)`,
-              cursor: draggingTable ? 'grabbing' : 'default',
+                              repeating-linear-gradient(90deg, transparent, transparent ${gridSize - 1}px, rgba(0,0,0,0.05) ${gridSize}px)`,
               transition: 'background-size 0.3s ease',
               p: 2,
               overflow: 'auto'
             }}
-            onClick={handleGridClick}
-            onMouseUp={handleDragEnd}
           >
             {/* Tables */}
             {sectionTables.map((table) => {
-              // Use draggingTable position if this is the table being dragged
-              const position = draggingTable && draggingTable._id === table._id
-                ? draggingTable.position
-                : table.position;
+              // Calculate table size based on capacity
+              const { width, height } = getTableSizeByCapacity(table.capacity);
+              
+              // Use position from the table data
+              const position = table.position || { x: 0, y: 0 };
               
               return (
                 <Box
@@ -783,183 +643,64 @@ const TablesLayout = () => {
                     position: 'absolute',
                     left: `${position?.x * gridSize}px`,
                     top: `${position?.y * gridSize}px`,
-                    width: 100,
-                    height: 100,
+                    width: width,
+                    height: height,
                     display: 'flex',
                     flexDirection: 'column',
                     justifyContent: 'center',
                     alignItems: 'center',
-                    borderRadius: '50%', // Mesas redondas
-                    cursor: table._isDragging ? 'grabbing' : 'grab',
-                    backgroundColor: table._hasCollision 
-                      ? 'error.light' // Vermelho mais claro para colisão
-                      : getTableStatusClass(table.status),
+                    borderRadius: '4px', // Mesa quadrada com cantos levemente arredondados
+                    backgroundColor: getTableStatusClass(table.status),
                     color: '#fff',
-                    boxShadow: table._id === draggingTable?._id 
-                      ? (table._hasCollision 
-                          ? '0 0 0 4px rgba(211, 47, 47, 0.5), 0 8px 20px rgba(0,0,0,0.3)' // Borda vermelha para colisão
-                          : '0 8px 20px rgba(0,0,0,0.3)') 
-                      : '0 4px 10px rgba(0,0,0,0.15)',
-                    transition: table._isDragging ? 'transform 0.1s ease, box-shadow 0.1s ease' : 'all 0.3s ease',
-                    zIndex: table._id === draggingTable?._id ? 10 : 1,
-                    transform: table._id === draggingTable?._id ? 'scale(1.1)' : 'scale(1)',
-                    opacity: table._isDragging ? 1 : 0.95,
-                    // Mostrar guias de alinhamento
-                    '&::before': table._alignedToX ? {
-                      content: '""',
-                      position: 'absolute',
-                      left: -1000,
-                      right: -1000,
-                      height: '2px',
-                      top: 'calc(50% - 1px)',
-                      backgroundColor: 'primary.main',
-                      opacity: 0.6,
-                      zIndex: -1
-                    } : {},
-                    '&::after': table._alignedToY ? {
-                      content: '""',
-                      position: 'absolute',
-                      top: -1000,
-                      bottom: -1000,
-                      width: '2px',
-                      left: 'calc(50% - 1px)',
-                      backgroundColor: 'primary.main',
-                      opacity: 0.6,
-                      zIndex: -1
-                    } : {},
-                    '&:hover': {
-                      boxShadow: '0 8px 25px rgba(0,0,0,0.25)',
-                      transform: 'translateY(-5px)'
-                    },
-                    '&:active': {
-                      cursor: 'grabbing',
-                      boxShadow: '0 8px 15px rgba(0,0,0,0.3)',
-                    },
-                    border: '2px solid white'
+                    boxShadow: '0 4px 10px rgba(0,0,0,0.15)',
+                    transition: 'all 0.3s ease',
+                    border: '2px solid rgba(255,255,255,0.8)',
+                    overflow: 'hidden'
                   }}
-                  onMouseDown={(e) => handleDragStart(table, e)}
-                  onTouchStart={(e) => handleDragStart(table, e)}
                 >
-                  {/* Indicador de arrasto */}
-                  {table._isDragging && (
-                    <Box sx={{
-                      position: 'absolute',
-                      top: -20,
-                      left: 0,
-                      right: 0,
-                      display: 'flex',
-                      justifyContent: 'center'
-                    }}>
-                      <Chip 
-                        label="Arrastando"
-                        size="small"
-                        color="primary"
-                        sx={{ opacity: 0.9, boxShadow: 1 }}
-                      />
-                    </Box>
-                  )}
-                  
-                  {/* Número da mesa com efeito de arrasto */}
-                  <Typography 
-                    variant="h5" 
-                    sx={{ 
-                      fontWeight: 'bold',
-                      mb: 0.5,
-                      textShadow: table._isDragging ? '0 2px 4px rgba(0,0,0,0.2)' : 'none'
-                    }}
-                  >
-                    {table.tableNumber}
-                  </Typography>
-                  
-                  {/* Capacidade com ícone */}
-                  <Box sx={{ 
-                    display: 'flex', 
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    mb: 1,
-                    bgcolor: 'rgba(0,0,0,0.15)',
-                    borderRadius: 10,
-                    px: 1,
-                    py: 0.3
-                  }}>
-                    <PeopleIcon sx={{ fontSize: 16, mr: 0.5 }} />
-                    <Typography variant="body2">{table.capacity}</Typography>
-                  </Box>
-                  
-                  {/* Indicador de colisão */}
-                  {table._hasCollision && (
-                    <Box sx={{
-                      position: 'absolute',
-                      bottom: -22,
-                      left: 0,
-                      right: 0,
-                      display: 'flex',
-                      justifyContent: 'center'
-                    }}>
-                      <Chip 
-                        label="Colisão detectada"
-                        size="small"
-                        color="error"
-                        sx={{ opacity: 0.9, boxShadow: 1 }}
-                      />
-                    </Box>
-                  )}
-                  
+                  {/* Indicação de Pessoas */}
                   <Box sx={{
                     position: 'absolute',
-                    bottom: 8,
+                    top: 5,
+                    right: 5,
                     display: 'flex',
                     alignItems: 'center',
-                    backgroundColor: 'rgba(0,0,0,0.2)',
+                    bgcolor: 'rgba(0,0,0,0.3)',
                     borderRadius: 10,
                     px: 1,
                     py: 0.2
                   }}>
                     <PeopleIcon fontSize="small" sx={{ mr: 0.5 }} />
-                    <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                    <Typography variant="body2" fontWeight="bold">
                       {table.capacity}
                     </Typography>
                   </Box>
                   
-                  {/* Action buttons */}
-                  <Box sx={{ 
-                    position: 'absolute', 
-                    top: -10, 
-                    right: -10, 
-                    display: 'flex',
-                    backgroundColor: 'white',
-                    borderRadius: '50%',
-                    padding: 0.5,
-                    boxShadow: 2,
-                    opacity: 0,
-                    transition: 'opacity 0.2s',
-                    '&:hover': {
-                      opacity: 1,
-                    }
-                  }}>
-                    <IconButton 
-                      size="small"
-                      color="primary"
-                      sx={{ mr: 0.5 }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleEditTable(table);
-                      }}
-                    >
-                      <EditIcon fontSize="small" />
-                    </IconButton>
-                    <IconButton 
-                      size="small"
-                      color="error"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDeleteDialog({ open: true, table });
-                      }}
-                    >
-                      <DeleteIcon fontSize="small" />
-                    </IconButton>
-                  </Box>
+                  {/* Número da mesa */}
+                  <Typography 
+                    variant="h5" 
+                    sx={{ 
+                      fontWeight: 'bold'
+                    }}
+                  >
+                    Mesa {table.tableNumber}
+                  </Typography>
                   
+                  {/* Visualização de cadeiras para mesas maiores */}
+                  {table.capacity > 4 && (
+                    <Box sx={{ 
+                      display: 'flex', 
+                      flexDirection: 'column',
+                      height: '70%',
+                      justifyContent: 'space-around',
+                      mt: 2
+                    }}>
+                      {[...Array(Math.min(Math.ceil(table.capacity/2), 6))].map((_, i) => (
+                        <PeopleIcon key={i} sx={{ fontSize: 20, opacity: 0.7 }} />
+                      ))}
+                    </Box>
+                  )}
+
                   {/* Status label */}
                   <Box sx={{ 
                     position: 'absolute',
@@ -978,6 +719,34 @@ const TablesLayout = () => {
                   }}>
                     {table.status === 'occupied' ? 'OCUPADA' :
                      table.status === 'reserved' ? 'RESERVADA' : ''}
+                  </Box>
+                  
+                  {/* Action buttons */}
+                  <Box sx={{ 
+                    position: 'absolute', 
+                    top: 5, 
+                    left: 5,
+                    display: 'flex',
+                    backgroundColor: 'white',
+                    borderRadius: '50%',
+                    padding: 0.5,
+                    boxShadow: 2
+                  }}>
+                    <IconButton 
+                      size="small"
+                      color="primary"
+                      sx={{ mr: 0.5 }}
+                      onClick={() => handleEditTable(table)}
+                    >
+                      <EditIcon fontSize="small" />
+                    </IconButton>
+                    <IconButton 
+                      size="small"
+                      color="error"
+                      onClick={() => setDeleteDialog({ open: true, table })}
+                    >
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
                   </Box>
                 </Box>
               );
@@ -1000,7 +769,9 @@ const TablesLayout = () => {
               borderRadius: 1,
               mr: 1 
             }} />
-            <Typography variant="body2">Disponível</Typography>
+            <Typography variant="body2">
+              Disponível
+            </Typography>
           </Box>
           
           <Box sx={{ display: 'flex', alignItems: 'center' }}>
@@ -1011,7 +782,9 @@ const TablesLayout = () => {
               borderRadius: 1,
               mr: 1 
             }} />
-            <Typography variant="body2">Ocupada</Typography>
+            <Typography variant="body2">
+              Ocupada
+            </Typography>
           </Box>
           
           <Box sx={{ display: 'flex', alignItems: 'center' }}>
@@ -1022,13 +795,8 @@ const TablesLayout = () => {
               borderRadius: 1,
               mr: 1 
             }} />
-            <Typography variant="body2">Reservada</Typography>
-          </Box>
-          
-          <Box sx={{ display: 'flex', alignItems: 'center', ml: 'auto' }}>
-            <DragIndicatorIcon sx={{ mr: 0.5, color: 'text.secondary' }} />
-            <Typography variant="body2" color="text.secondary">
-              Arraste as mesas para posicioná-las
+            <Typography variant="body2">
+              Reservada
             </Typography>
           </Box>
         </Box>

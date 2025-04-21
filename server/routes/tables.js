@@ -185,4 +185,43 @@ router.get('/status/:status', protect, async (req, res) => {
   }
 });
 
+// @route   POST /api/tables/update-positions
+// @desc    Update positions of multiple tables
+// @access  Private
+router.post('/update-positions', protect, authorize('superadmin'), async (req, res) => {
+  try {
+    const { tables } = req.body;
+    
+    if (!tables || !Array.isArray(tables)) {
+      return res.status(400).json({ message: 'Dados inválidos. Lista de mesas é obrigatória.' });
+    }
+    
+    // Array para armazenar as operações de atualização
+    const bulkOps = tables.map(table => ({
+      updateOne: {
+        filter: { _id: table._id },
+        // Atualizamos apenas a posição para garantir segurança
+        update: { 
+          $set: { 
+            position: {
+              x: table.position.x,
+              y: table.position.y
+            }
+          } 
+        }
+      }
+    }));
+    
+    // Executa todas as atualizações em uma única operação
+    if (bulkOps.length > 0) {
+      await Table.bulkWrite(bulkOps);
+    }
+    
+    res.json({ success: true, count: tables.length });
+  } catch (error) {
+    console.error('Update positions error:', error);
+    res.status(500).json({ message: 'Erro ao atualizar posições das mesas' });
+  }
+});
+
 module.exports = router;

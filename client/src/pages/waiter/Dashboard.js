@@ -7,16 +7,12 @@ import {
   CircularProgress,
   Card,
   CardContent,
-  Button,
   Chip,
   Alert,
   Divider,
-  IconButton,
-  useMediaQuery,
   useTheme
 } from '@mui/material';
 import TableRestaurantIcon from '@mui/icons-material/TableRestaurant';
-import AddCircleIcon from '@mui/icons-material/AddCircle';
 import PersonIcon from '@mui/icons-material/Person';
 import RestaurantMenuIcon from '@mui/icons-material/RestaurantMenu';
 import ReceiptIcon from '@mui/icons-material/Receipt';
@@ -33,7 +29,6 @@ const WaiterDashboard = () => {
   const navigate = useNavigate();
   const { notifications } = useSocket();
   const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
   // Load tables and active orders
   useEffect(() => {

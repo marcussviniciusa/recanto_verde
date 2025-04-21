@@ -430,4 +430,173 @@ router.get('/performance/waiters', protect, authorize('superadmin'), async (req,
   }
 });
 
+// @route   GET /api/dashboard/analytics
+// @desc    Get comprehensive analytics data for dashboard
+// @access  Private/Superadmin
+router.get('/analytics', protect, authorize('superadmin'), async (req, res) => {
+  try {
+    // Get time range from query parameter
+    const timeRange = req.query.timeRange || 'week';
+    
+    // Set start date based on time range
+    const endDate = new Date();
+    let startDate = new Date();
+    
+    switch (timeRange) {
+      case 'day':
+        startDate.setHours(0, 0, 0, 0);
+        break;
+      case 'week':
+        startDate.setDate(startDate.getDate() - 7);
+        break;
+      case 'month':
+        startDate.setMonth(startDate.getMonth() - 1);
+        break;
+      case 'quarter':
+        startDate.setMonth(startDate.getMonth() - 3);
+        break;
+      case 'year':
+        startDate.setFullYear(startDate.getFullYear() - 1);
+        break;
+      default:
+        startDate.setDate(startDate.getDate() - 7);
+    }
+    
+    // Get all completed and paid orders in the time range
+    const orders = await Order.find({
+      createdAt: { $gte: startDate, $lte: endDate },
+      status: 'completed',
+      paymentStatus: 'paid'
+    }).populate('table waiter items.menuItem');
+    
+    // Calculate summary metrics
+    const totalRevenue = orders.reduce((sum, order) => sum + order.totalAmount, 0);
+    const totalOrders = orders.length;
+    const averageTicket = totalOrders > 0 ? totalRevenue / totalOrders : 0;
+    
+    // Count unique customers (simplified - in a real system this would use customer IDs)
+    // Here we'll use unique tables as a proxy for customers
+    const uniqueTables = new Set(orders.map(order => order.table?._id.toString())).size;
+    
+    // Calculate table turnover rate
+    const allTables = await Table.countDocuments();
+    const tableTurnover = allTables > 0 ? totalOrders / allTables : 0;
+    
+    // Group sales by day
+    const salesByDay = {};
+    const dayNames = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+    
+    // Initialize with all days of week at 0
+    dayNames.forEach(day => {
+      salesByDay[day] = 0;
+    });
+    
+    // Fill in actual data
+    orders.forEach(order => {
+      const day = dayNames[new Date(order.createdAt).getDay()];
+      salesByDay[day] += order.totalAmount;
+    });
+    
+    // Collect data for top selling items
+    const itemSales = {};
+    const itemsData = {};
+    
+    orders.forEach(order => {
+      order.items.forEach(item => {
+        const itemId = item.menuItem?._id.toString();
+        if (itemId) {
+          if (!itemSales[itemId]) {
+            itemSales[itemId] = 0;
+            itemsData[itemId] = {
+              name: item.menuItem.name,
+              category: item.menuItem.category
+            };
+          }
+          itemSales[itemId] += item.quantity;
+        }
+      });
+    });
+    
+    // Sort and get top items
+    const topItems = Object.keys(itemSales)
+      .sort((a, b) => itemSales[b] - itemSales[a])
+      .slice(0, 5)
+      .map(id => ({
+        id,
+        name: itemsData[id].name,
+        quantity: itemSales[id]
+      }));
+    
+    // Collect data for category distribution
+    const categorySales = {};
+    
+    orders.forEach(order => {
+      order.items.forEach(item => {
+        if (item.menuItem?.category) {
+          const category = item.menuItem.category;
+          if (!categorySales[category]) {
+            categorySales[category] = 0;
+          }
+          categorySales[category] += item.quantity;
+        }
+      });
+    });
+    
+    // Get hourly traffic
+    const hourlyTraffic = {};
+    
+    // Initialize all hours to 0
+    for (let i = 0; i < 24; i++) {
+      const hourStr = `${i.toString().padStart(2, '0')}:00`;
+      hourlyTraffic[hourStr] = 0;
+    }
+    
+    // Fill in actual data
+    orders.forEach(order => {
+      const hour = new Date(order.createdAt).getHours();
+      const hourStr = `${hour.toString().padStart(2, '0')}:00`;
+      hourlyTraffic[hourStr] += 1;
+    });
+    
+    // Filter hourly traffic to restaurant hours (typically 11am to midnight)
+    const filteredHourlyTraffic = {};
+    for (let i = 11; i <= 23; i++) {
+      const hourStr = `${i.toString().padStart(2, '0')}:00`;
+      filteredHourlyTraffic[hourStr] = hourlyTraffic[hourStr];
+    }
+    
+    // Prepare final response
+    const analyticsData = {
+      summary: {
+        revenue: totalRevenue,
+        orders: totalOrders,
+        averageTicket,
+        customers: uniqueTables,
+        tableTurnover: parseFloat(tableTurnover.toFixed(1))
+      },
+      sales: {
+        labels: Object.keys(salesByDay),
+        data: Object.values(salesByDay)
+      },
+      topItems: {
+        labels: topItems.map(item => item.name),
+        data: topItems.map(item => item.quantity)
+      },
+      categoryDistribution: {
+        labels: Object.keys(categorySales),
+        data: Object.values(categorySales)
+      },
+      hourlyTraffic: {
+        labels: Object.keys(filteredHourlyTraffic),
+        data: Object.values(filteredHourlyTraffic)
+      }
+    };
+    
+    res.json(analyticsData);
+  } catch (error) {
+    console.error('Analytics data error:', error);
+    res.status(500).json({ message: 'Erro ao obter dados analíticos' });
+  }
+});
+
 module.exports = router;

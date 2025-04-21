@@ -36,14 +36,13 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import SearchIcon from '@mui/icons-material/Search';
 import PersonIcon from '@mui/icons-material/Person';
 import AssessmentIcon from '@mui/icons-material/Assessment';
-import VisibilityIcon from '@mui/icons-material/Visibility';
 import StarIcon from '@mui/icons-material/Star';
 import { useAuth } from '../../context/AuthContext';
 import axios from 'axios';
 import AppLayout from '../../components/layout/AppLayout';
 
 const UserManagement = () => {
-  const { user, register } = useAuth();
+  const { register } = useAuth();
   
   // State
   const [users, setUsers] = useState([]);
@@ -77,7 +76,8 @@ const UserManagement = () => {
   // Delete confirmation dialog
   const [deleteDialog, setDeleteDialog] = useState({
     open: false,
-    user: null
+    user: null,
+    permanent: false
   });
   
   // Pagination state
@@ -90,6 +90,7 @@ const UserManagement = () => {
       try {
         setLoading(true);
         const response = await axios.get('/api/users');
+        console.log('Dados iniciais de usuários:', response.data);
         setUsers(response.data);
         setError(null);
       } catch (err) {
@@ -102,7 +103,31 @@ const UserManagement = () => {
     
     fetchUsers();
   }, []);
-  
+
+  // Função para recarregar usuários
+  const reloadUsers = async () => {
+    try {
+      setLoading(true);
+      const response = await axios.get('/api/users');
+      console.log('Dados de usuários carregados:', response.data);
+      setUsers(response.data);
+      setError(null);
+    } catch (err) {
+      console.error('Error reloading users:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Adicionar depuração para verificar os dados filtrados
+  useEffect(() => {
+    console.log('Estado atual de usuários:', users);
+    // Verificar o estado antes de filtrar
+    if (users && users.length > 0) {
+      console.log('Primeiro usuário:', users[0]);
+    }
+  }, [users]);
+
   // Handle dialog open for new user
   const handleAddUser = () => {
     setUserDialog({
@@ -181,13 +206,39 @@ const UserManagement = () => {
         
         setSuccess('Usuário atualizado com sucesso!');
       } else {
-        // Create new user
-        response = await register(userData);
-        
-        // Add to local state
-        setUsers([...users, response]);
-        
-        setSuccess('Usuário adicionado com sucesso!');
+        try {
+          // Create new user
+          // Verificar se o e-mail já existe antes de registrar
+          const checkUser = users.find(u => u.email === userData.email);
+          if (checkUser) {
+            throw new Error('Usuário com este e-mail já existe.');
+          }
+          
+          // Preparar dados para envio
+          const newUserData = {
+            name: userData.name,
+            email: userData.email,
+            password: userData.password,
+            role: userData.role
+          };
+          
+          response = await register(newUserData);
+          
+          // Recarregar a lista de usuários para garantir consistência
+          await reloadUsers();
+          
+          setSuccess('Usuário adicionado com sucesso!');
+          
+          // Close dialog on success
+          setUserDialog({
+            ...userDialog,
+            open: false
+          });
+        } catch (registerError) {
+          setError(registerError.message || 'Erro ao criar usuário. Verifique se o e-mail já está em uso.');
+          setLoading(false);
+          return;
+        }
       }
       
       // Close dialog
@@ -197,7 +248,7 @@ const UserManagement = () => {
       });
     } catch (err) {
       console.error('Error saving user:', err);
-      setError(err.response?.data?.message || 'Erro ao salvar usuário. Tente novamente.');
+      setError(err.message || 'Erro ao salvar usuário. Tente novamente.');
     } finally {
       setLoading(false);
     }
@@ -224,46 +275,94 @@ const UserManagement = () => {
         u._id === userData._id ? response.data : u
       ));
       
-      setSuccess(`Usuário ${updatedUser.active ? 'ativado' : 'desativado'} com sucesso!`);
+      setSuccess(`Usuário ${userData.active ? 'desativado' : 'ativado'} com sucesso!`);
     } catch (err) {
       console.error('Error toggling user status:', err);
-      setError('Erro ao atualizar status do usuário. Tente novamente.');
+      setError(err.response?.data?.message || 'Erro ao atualizar status do usuário.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Handle permanent deletion of a user
+  const handlePermanentDelete = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      setSuccess(null);
+
+      // Call API to permanently delete the user
+      await axios.delete(`/api/users/${deleteDialog.user._id}/permanent`);
+      
+      // Update local state by removing the user
+      setUsers(users.filter(u => u._id !== deleteDialog.user._id));
+      
+      setSuccess('Usuário excluído permanentemente com sucesso!');
+      
+      // Close dialog
+      setDeleteDialog({
+        open: false,
+        user: null,
+        permanent: false
+      });
+    } catch (err) {
+      console.error('Error permanently deleting user:', err);
+      const errorMessage = err.response?.data?.message || 'Erro ao excluir usuário permanentemente.';
+      setError(errorMessage);
+      // Manter o diálogo aberto em caso de erro
     } finally {
       setLoading(false);
     }
   };
   
-  // Handle delete confirmation
+  // Handle deletion confirmation
   const handleDeleteConfirm = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      setSuccess(null);
-      
-      // Delete/deactivate the user
-      await axios.delete(`/api/users/${deleteDialog.user._id}`);
-      
-      // Update local state - in our API, delete just deactivates
-      setUsers(users.map(u => {
-        if (u._id === deleteDialog.user._id) {
-          return { ...u, active: false };
-        }
-        return u;
-      }));
-      
-      setSuccess('Usuário desativado com sucesso!');
-      
-      // Close dialog
-      setDeleteDialog({
-        open: false,
-        user: null
-      });
-    } catch (err) {
-      console.error('Error deleting user:', err);
-      setError('Erro ao desativar usuário. Tente novamente.');
-    } finally {
-      setLoading(false);
+    if (deleteDialog.permanent) {
+      await handlePermanentDelete();
+    } else {
+      try {
+        setLoading(true);
+        setError(null);
+        setSuccess(null);
+        
+        // Desativar o usuário
+        const updatedUser = {
+          ...deleteDialog.user,
+          active: false
+        };
+        
+        // Update in API
+        await axios.put(`/api/users/${deleteDialog.user._id}`, updatedUser);
+        
+        // Update local state
+        setUsers(users.map(u => 
+          u._id === deleteDialog.user._id ? {...u, active: false} : u
+        ));
+        
+        setSuccess('Usuário desativado com sucesso!');
+        
+        // Close dialog
+        setDeleteDialog({
+          open: false,
+          user: null,
+          permanent: false
+        });
+      } catch (err) {
+        console.error('Error deactivating user:', err);
+        setError(err.response?.data?.message || 'Erro ao desativar usuário.');
+      } finally {
+        setLoading(false);
+      }
     }
+  };
+
+  // Open dialog for deactivation
+  const handleOpenDeleteDialog = (user, permanent = false) => {
+    setDeleteDialog({
+      open: true,
+      user,
+      permanent
+    });
   };
   
   // Handle pagination
@@ -278,16 +377,37 @@ const UserManagement = () => {
   
   // Filter users
   const filteredUsers = users.filter(user => {
-    // Don't show current user in the list
-    if (user._id === user?._id) return false;
-    
+    // Filtro por texto de busca
     const matchesSearch = user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          user.email.toLowerCase().includes(searchTerm.toLowerCase());
+                         user.email.toLowerCase().includes(searchTerm.toLowerCase());
     
+    // Filtro por função (role)
     const matchesRole = filterRole === 'all' || user.role === filterRole;
     
+    // Resultado final do filtro
     return matchesSearch && matchesRole;
   });
+  
+  // Paginated users
+  const paginatedUsers = filteredUsers.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
+
+  // Log para depuração dos filtros
+  useEffect(() => {
+    console.log('Total de usuários no estado:', users.length);
+    console.log('Usuários após filtro:', filteredUsers.length);
+    console.log('Usuários na página atual:', paginatedUsers.length);
+    
+    // Depuração detalhada dos filtros
+    if (users.length > 0 && filteredUsers.length === 0) {
+      console.warn('Filtro está removendo todos os usuários!');
+      users.forEach((user, idx) => {
+        const matchesSearch = user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                             user.email.toLowerCase().includes(searchTerm.toLowerCase());
+        const matchesRole = filterRole === 'all' || user.role === filterRole;
+        console.log(`Usuário ${idx + 1} (${user.name}): matchesSearch=${matchesSearch}, matchesRole=${matchesRole}`);
+      });
+    }
+  }, [users, filteredUsers, paginatedUsers, searchTerm, filterRole, page, rowsPerPage]);
   
   // Get role display name
   const getRoleName = (role) => {
@@ -311,9 +431,6 @@ const UserManagement = () => {
       .toUpperCase()
       .substring(0, 2);
   };
-  
-  // Paginated users
-  const paginatedUsers = filteredUsers.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
 
   return (
     <AppLayout>
@@ -472,6 +589,17 @@ const UserManagement = () => {
                         >
                           {userData.active ? <DeleteIcon fontSize="small" /> : <PersonIcon fontSize="small" />}
                         </IconButton>
+                        {userData.role !== 'superadmin' && (
+                          <IconButton 
+                            size="small" 
+                            color="error"
+                            onClick={() => handleOpenDeleteDialog(userData, true)}
+                            title="Excluir permanentemente"
+                            sx={{ ml: 0.5 }}
+                          >
+                            <DeleteIcon fontSize="small" sx={{ color: 'error.dark' }} />
+                          </IconButton>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -668,28 +796,47 @@ const UserManagement = () => {
       {/* Delete Confirmation Dialog */}
       <Dialog
         open={deleteDialog.open}
-        onClose={() => setDeleteDialog({ open: false, user: null })}
+        onClose={() => setDeleteDialog({ open: false, user: null, permanent: false })}
       >
-        <DialogTitle>Confirmar Exclusão</DialogTitle>
+        <DialogTitle>
+          {deleteDialog.permanent ? 'Confirmar Exclusão Permanente' : 'Confirmar Desativação'}
+        </DialogTitle>
         <DialogContent>
-          <Typography>
-            Tem certeza que deseja desativar o usuário <strong>{deleteDialog.user?.name}</strong>?
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            A conta será desativada, mas os dados permanecerão no sistema.
-          </Typography>
+          {deleteDialog.permanent ? (
+            <>
+              <Typography color="error" variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1 }}>
+                ATENÇÃO: Esta ação não pode ser desfeita!
+              </Typography>
+              <Typography>
+                Tem certeza que deseja <strong>excluir permanentemente</strong> o usuário <strong>{deleteDialog.user?.name}</strong>?
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                Todos os dados do usuário serão removidos definitivamente do sistema.
+              </Typography>
+            </>
+          ) : (
+            <>
+              <Typography>
+                Tem certeza que deseja desativar o usuário <strong>{deleteDialog.user?.name}</strong>?
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                A conta será desativada, mas os dados permanecerão no sistema.
+              </Typography>
+            </>
+          )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDeleteDialog({ open: false, user: null })}>
+          <Button onClick={() => setDeleteDialog({ open: false, user: null, permanent: false })}>
             Cancelar
           </Button>
           <Button 
+            variant={deleteDialog.permanent ? 'contained' : 'text'}
             color="error" 
             onClick={handleDeleteConfirm}
             disabled={loading}
             startIcon={loading ? <CircularProgress size={20} /> : null}
           >
-            Desativar
+            {deleteDialog.permanent ? 'Excluir Permanentemente' : 'Desativar'}
           </Button>
         </DialogActions>
       </Dialog>

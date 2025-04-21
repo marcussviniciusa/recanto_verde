@@ -86,15 +86,25 @@ router.post('/register', protect, authorize('superadmin'), async (req, res) => {
       email,
       password,
       role,
+      active: true
     });
     
-    res.status(201).json({
+    // Retorna dados completos do usuário (exceto senha)
+    const userData = {
       _id: user._id,
       name: user.name,
       email: user.email,
       role: user.role,
-      token: generateToken(user._id),
-    });
+      active: user.active,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+      performance: user.performance || { ordersServed: 0 }
+    };
+    
+    console.log('Novo usuário registrado:', userData);
+    
+    // Resposta 201 Created com dados completos do usuário
+    res.status(201).json(userData);
   } catch (error) {
     console.error('Registration error:', error);
     res.status(500).json({ message: 'Erro no servidor' });

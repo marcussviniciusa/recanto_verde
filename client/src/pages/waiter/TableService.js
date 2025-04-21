@@ -8,7 +8,6 @@ import {
   CircularProgress,
   Alert,
   Chip,
-  IconButton,
   Card,
   CardContent,
   Grid,
@@ -17,10 +16,7 @@ import {
   DialogContent,
   DialogActions,
   TextField,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem
+  FormControl
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import ReceiptIcon from '@mui/icons-material/Receipt';
@@ -41,7 +37,7 @@ const TableService = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { emitTableUpdate, emitNewOrder } = useSocket();
+  const { emitTableUpdate } = useSocket();
   
   const [table, setTable] = useState(null);
   const [orders, setOrders] = useState([]);
@@ -128,7 +124,7 @@ const TableService = () => {
     }
     
     try {
-      const updatedTable = await updateTableStatus('occupied');
+      await updateTableStatus('occupied');
       
       // Navigate to order creation
       navigate(`/create-order/${id}`);

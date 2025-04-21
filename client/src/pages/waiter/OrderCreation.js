@@ -11,7 +11,6 @@ import {
   TextField,
   Grid,
   Card,
-  CardContent,
   CardMedia,
   IconButton,
   Tab,
@@ -20,11 +19,9 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
-  InputAdornment,
   List,
   ListItem,
-  ListItemText,
-  ListItemSecondaryAction
+  ListItemText
 } from '@mui/material';
 import AddCircleIcon from '@mui/icons-material/AddCircle';
 import RemoveCircleIcon from '@mui/icons-material/RemoveCircle';

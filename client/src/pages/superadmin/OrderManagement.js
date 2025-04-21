@@ -40,6 +40,7 @@ import LocalDiningIcon from '@mui/icons-material/LocalDining';
 import PersonIcon from '@mui/icons-material/Person';
 import PaymentIcon from '@mui/icons-material/Payment';
 import PrintIcon from '@mui/icons-material/Print';
+import DeleteIcon from '@mui/icons-material/Delete';
 import axios from 'axios';
 import { format, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -70,6 +71,9 @@ const OrderManagement = () => {
     order: null,
     status: ''
   });
+  
+  // Delete order confirmation dialog
+  const [deleteDialog, setDeleteDialog] = useState({ open: false, order: null });
   
   // Pagination
   const [page, setPage] = useState(0);
@@ -148,6 +152,24 @@ const OrderManagement = () => {
     } catch (err) {
       console.error('Error updating payment status:', err);
       setError('Erro ao atualizar status de pagamento. Tente novamente.');
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // Handle delete order
+  const handleDeleteOrder = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      setSuccess(null);
+      await axios.delete(`/api/orders/${deleteDialog.order._id}`);
+      setOrders(prev => prev.filter(o => o._id !== deleteDialog.order._id));
+      setSuccess('Pedido cancelado com sucesso!');
+      setDeleteDialog({ open: false, order: null });
+    } catch (err) {
+      console.error('Erro ao cancelar pedido:', err);
+      setError(err.response?.data?.message || 'Erro ao cancelar pedido.');
     } finally {
       setLoading(false);
     }
@@ -458,6 +480,15 @@ const OrderManagement = () => {
                             <PaymentIcon fontSize="small" />
                           </IconButton>
                         )}
+                        <IconButton 
+                          size="small"
+                          color="error"
+                          onClick={() => setDeleteDialog({ open: true, order })}
+                          title="Cancelar pedido"
+                          sx={{ ml: 0.5 }}
+                        >
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -687,6 +718,36 @@ const OrderManagement = () => {
             startIcon={loading ? <CircularProgress size={20} /> : null}
           >
             Atualizar
+          </Button>
+        </DialogActions>
+      </Dialog>
+      
+      {/* Delete Order Confirmation Dialog */}
+      <Dialog
+        open={deleteDialog.open}
+        onClose={() => setDeleteDialog({ open: false, order: null })}
+      >
+        <DialogTitle>Confirmar Cancelamento</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Tem certeza que deseja cancelar o pedido <strong>#{deleteDialog.order?._id?.substring(deleteDialog.order?._id?.length - 6).toUpperCase()}</strong>?
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+            O pedido será cancelado e não poderá ser recuperado.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteDialog({ open: false, order: null })}>
+            Cancelar
+          </Button>
+          <Button
+            variant="contained"
+            color="error"
+            onClick={handleDeleteOrder}
+            disabled={loading}
+            startIcon={loading ? <CircularProgress size={20} /> : <DeleteIcon />}
+          >
+            Cancelar Pedido
           </Button>
         </DialogActions>
       </Dialog>

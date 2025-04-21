@@ -5,8 +5,6 @@ import {
   Typography, 
   Tooltip, 
   CircularProgress,
-  Badge,
-  IconButton,
   Alert
 } from '@mui/material';
 import TableRestaurantIcon from '@mui/icons-material/TableRestaurant';
@@ -21,7 +19,7 @@ const TableStatusMap = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const navigate = useNavigate();
-  const { emitTableUpdate } = useSocket();
+  const socket = useSocket();
   const { user } = useAuth();
   
   // Fetch tables data
@@ -30,7 +28,19 @@ const TableStatusMap = () => {
       try {
         setLoading(true);
         const response = await axios.get('/api/tables');
-        setTables(response.data);
+        
+        // Verifica se as mesas têm posições definidas, caso contrário reorganiza automaticamente
+        const fetchedTables = response.data;
+        const needsReorganization = fetchedTables.some(table => 
+          !table.position || table.position.x === undefined || table.position.y === undefined
+        );
+        
+        // Organiza automaticamente se necessário
+        const organizedTables = needsReorganization 
+          ? reorganizeTables(fetchedTables) 
+          : fetchedTables;
+        
+        setTables(organizedTables);
         setError(null);
       } catch (err) {
         console.error('Error fetching tables:', err);
@@ -47,6 +57,63 @@ const TableStatusMap = () => {
     
     return () => clearInterval(interval);
   }, []);
+  
+  // Função para organizar automaticamente as mesas (simplificada para o dashboard)
+  const reorganizeTables = (allTables) => {
+    const groupedBySection = {};
+    
+    // Agrupa as mesas por seção
+    allTables.forEach(table => {
+      const section = table.section || 'main';
+      if (!groupedBySection[section]) {
+        groupedBySection[section] = [];
+      }
+      groupedBySection[section].push(table);
+    });
+    
+    let reorganized = [];
+    
+    // Para cada seção, organiza as mesas em grade
+    Object.keys(groupedBySection).forEach(section => {
+      const sectionTables = groupedBySection[section]
+        .sort((a, b) => a.tableNumber - b.tableNumber);
+      
+      // Configurações de grade para cada seção
+      const gridColumns = 4; // 4 mesas por linha
+      const spacingX = 5; // Espaçamento horizontal
+      const spacingY = 5; // Espaçamento vertical
+      
+      // Reorganiza cada mesa na seção
+      sectionTables.forEach((table, index) => {
+        const row = Math.floor(index / gridColumns);
+        const column = index % gridColumns;
+        
+        // Calcula o tamanho baseado na capacidade
+        const tableSize = getTableSizeBasedOnCapacity(table.capacity);
+        
+        // Calcula a posição considerando o tamanho
+        const x = 3 + (column * spacingX);
+        const y = 3 + (row * spacingY);
+        
+        // Atualiza a posição
+        table.position = { x, y };
+        table._size = tableSize; // Armazena o tamanho para uso posterior
+        
+        reorganized.push(table);
+      });
+    });
+    
+    return reorganized;
+  };
+  
+  // Determina o tamanho relativo da mesa com base na capacidade
+  const getTableSizeBasedOnCapacity = (capacity) => {
+    // Tamanhos base para mesas de acordo com a capacidade
+    if (capacity <= 2) return 0.8; // Mesa pequena (80% do tamanho padrão)
+    if (capacity <= 4) return 1.0; // Mesa padrão
+    if (capacity <= 8) return 1.3; // Mesa média (30% maior)
+    return 1.6; // Mesa grande (60% maior)
+  };
   
   // Handle table click - navigate to table details
   const handleTableClick = (table) => {
@@ -126,9 +193,8 @@ const TableStatusMap = () => {
     );
   }
 
-  // Calculate grid dimensions based on tables positions
-  const maxX = Math.max(...tables.map(table => table.position.x)) + 1;
-  const maxY = Math.max(...tables.map(table => table.position.y)) + 1;
+  // Define a grid system for better organization
+  const gridSize = 25; // Pixel size of each grid unit
 
   return (
     <Box sx={{ 
@@ -137,76 +203,98 @@ const TableStatusMap = () => {
       minHeight: 400,
       border: '1px dashed #ccc',
       borderRadius: 1,
-      p: 1,
-      backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 19px, rgba(0,0,0,0.05) 20px), repeating-linear-gradient(90deg, transparent, transparent 19px, rgba(0,0,0,0.05) 20px)',
-      backgroundSize: '20px 20px',
+      p: 2,
+      backgroundImage: `repeating-linear-gradient(0deg, transparent, transparent ${gridSize - 1}px, rgba(0,0,0,0.05) ${gridSize}px), 
+                      repeating-linear-gradient(90deg, transparent, transparent ${gridSize - 1}px, rgba(0,0,0,0.05) ${gridSize}px)`,
+      backgroundSize: `${gridSize}px ${gridSize}px`,
+      overflow: 'auto',
     }}>
-      {tables.map(table => (
-        <Tooltip
-          key={table._id}
-          title={
-            <Box>
-              <Typography variant="subtitle2">
-                Mesa {table.tableNumber}
-              </Typography>
-              <Typography variant="body2">
-                Status: {table.status === 'available' ? 'Disponível' : table.status === 'occupied' ? 'Ocupada' : 'Reservada'}
-              </Typography>
-              <Typography variant="body2">
-                Capacidade: {table.capacity} pessoas
-              </Typography>
-              {table.status === 'occupied' && (
-                <>
-                  <Typography variant="body2">
-                    Garçom: {table.assignedWaiter?.name || 'Não atribuído'}
-                  </Typography>
-                  {table.occupiedAt && (
+      {tables.map(table => {
+        // Calculate size based on capacity
+        const sizeMultiplier = table._size || getTableSizeBasedOnCapacity(table.capacity);
+        const baseSize = 70; // Base size in pixels
+        const tableSize = Math.round(baseSize * sizeMultiplier);
+        
+        return (
+          <Tooltip
+            key={table._id}
+            title={
+              <Box>
+                <Typography variant="subtitle2">
+                  Mesa {table.tableNumber}
+                </Typography>
+                <Typography variant="body2">
+                  Status: {table.status === 'available' ? 'Disponível' : table.status === 'occupied' ? 'Ocupada' : 'Reservada'}
+                </Typography>
+                <Typography variant="body2">
+                  Capacidade: {table.capacity} pessoas
+                </Typography>
+                {table.status === 'occupied' && (
+                  <>
                     <Typography variant="body2">
-                      Tempo: {getOccupiedTime(table.occupiedAt)}
+                      Garçom: {table.assignedWaiter?.name || 'Não atribuído'}
                     </Typography>
-                  )}
-                </>
-              )}
-            </Box>
-          }
-          arrow
-        >
-          <Paper
-            elevation={3}
-            className={getTableStatusClass(table.status)}
-            sx={{
-              position: 'absolute',
-              left: `${(table.position.x / maxX) * 100}%`,
-              top: `${(table.position.y / maxY) * 100}%`,
-              transform: 'translate(-50%, -50%)',
-              width: 80,
-              height: 80,
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              borderRadius: 1,
-              cursor: 'pointer',
-              transition: 'all 0.2s ease-in-out',
-              '&:hover': {
-                transform: 'translate(-50%, -50%) scale(1.05)',
-                boxShadow: 6,
-              },
-            }}
-            onClick={() => handleTableClick(table)}
+                    {table.occupiedAt && (
+                      <Typography variant="body2">
+                        Tempo: {getOccupiedTime(table.occupiedAt)}
+                      </Typography>
+                    )}
+                  </>
+                )}
+              </Box>
+            }
+            arrow
+            placement="top"
           >
-            <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
-              {table.tableNumber}
-            </Typography>
-            <Box sx={{ display: 'flex', alignItems: 'center', mt: 0.5 }}>
-              <PersonIcon fontSize="small" sx={{ mr: 0.5 }} />
-              <Typography variant="body2">
-                {table.capacity}
+            <Paper
+              elevation={3}
+              className={getTableStatusClass(table.status)}
+              sx={{
+                position: 'absolute',
+                left: `${table.position.x * gridSize}px`,
+                top: `${table.position.y * gridSize}px`,
+                width: tableSize,
+                height: tableSize,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: '4px', // Mesa quadrada com cantos suavizados
+                cursor: 'pointer',
+                transition: 'all 0.2s ease-in-out',
+                '&:hover': {
+                  transform: 'scale(1.05)',
+                  boxShadow: 6,
+                },
+                border: '2px solid rgba(255,255,255,0.7)',
+              }}
+              onClick={() => handleTableClick(table)}
+            >
+              <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
+                {table.tableNumber}
               </Typography>
-            </Box>
-          </Paper>
-        </Tooltip>
-      ))}
+              <Box sx={{ display: 'flex', alignItems: 'center', mt: 0.5 }}>
+                <PersonIcon fontSize="small" sx={{ mr: 0.5 }} />
+                <Typography variant="body2" fontWeight="bold">
+                  {table.capacity}
+                </Typography>
+              </Box>
+              {table.status === 'occupied' && table.occupiedAt && (
+                <Typography variant="caption" sx={{ 
+                  position: 'absolute', 
+                  bottom: 4, 
+                  bgcolor: 'rgba(0,0,0,0.15)',
+                  px: 1,
+                  borderRadius: 5,
+                  fontSize: '0.7rem'
+                }}>
+                  {getOccupiedTime(table.occupiedAt)}
+                </Typography>
+              )}
+            </Paper>
+          </Tooltip>
+        );
+      })}
       
       {/* Legend */}
       <Box sx={{ 
@@ -216,7 +304,8 @@ const TableStatusMap = () => {
         display: 'flex',
         bgcolor: 'rgba(255,255,255,0.8)',
         p: 1,
-        borderRadius: 1
+        borderRadius: 1,
+        boxShadow: 1
       }}>
         <Box sx={{ display: 'flex', alignItems: 'center', mr: 2 }}>
           <Box sx={{ 

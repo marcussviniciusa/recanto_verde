@@ -18,9 +18,6 @@ import {
   MenuItem,
   Switch,
   FormControlLabel,
-  Card,
-  CardContent,
-  CardMedia,
   Chip,
   CircularProgress,
   Alert,
@@ -242,7 +239,19 @@ const MenuManagement = () => {
       });
     } catch (err) {
       console.error('Error deleting menu item:', err);
-      setError('Erro ao remover item. Tente novamente.');
+      
+      // Mensagem de erro mais específica
+      const errorMessage = err.response?.data?.message || 'Erro ao remover item. Tente novamente.';
+      setError(errorMessage);
+      
+      // Mantém o diálogo aberto apenas se houver um erro que o usuário pode resolver
+      if (!err.response || err.response.status >= 500) {
+        // Erro do servidor, fecha o diálogo
+        setDeleteDialog({
+          open: false,
+          item: null
+        });
+      }
     } finally {
       setLoading(false);
     }
