@@ -1,0 +1,88 @@
+body {
+  margin: 0;
+  font-family: 'Roboto', 'Segoe UI', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+
+/* Table status colors */
+.table-available {
+  background-color: #4CAF50 !important;
+  color: white !important;
+}
+
+.table-occupied {
+  background-color: #FFC107 !important;
+  color: black !important;
+}
+
+.table-reserved {
+  background-color: #FF9800 !important;
+  color: white !important;
+}
+
+/* Order status colors */
+.status-pending {
+  color: #FFC107;
+}
+
+.status-preparing {
+  color: #2196F3;
+}
+
+.status-ready {
+  color: #4CAF50;
+}
+
+.status-delivered {
+  color: #9C27B0;
+}
+
+.status-cancelled {
+  color: #F44336;
+}
+
+/* Responsive adjustments */
+@media (max-width: 600px) {
+  .responsive-hide {
+    display: none;
+  }
+  
+  .responsive-text-sm {
+    font-size: 0.875rem !important;
+  }
+  
+  .responsive-padding {
+    padding: 8px !important;
+  }
+}
+
+/* Animation for notifications */
+@keyframes highlight {
+  0% {
+    background-color: rgba(255, 193, 7, 0.2);
+  }
+  50% {
+    background-color: rgba(255, 193, 7, 0.5);
+  }
+  100% {
+    background-color: rgba(255, 193, 7, 0.2);
+  }
+}
+
+.highlight-animation {
+  animation: highlight 2s ease-in-out;
+}
+
+/* Touch-friendly button sizes for mobile */
+.touch-button {
+  min-height: 48px;
+  min-width: 48px;
+}
