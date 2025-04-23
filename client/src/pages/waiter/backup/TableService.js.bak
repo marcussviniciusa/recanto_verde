@@ -1,0 +1,991 @@
+import React, { useState, useEffect, useContext, useLayoutEffect } from 'react';
+import {
+  Box,
+  Paper,
+  Typography,
+  Button,
+  Divider,
+  CircularProgress,
+  Alert,
+  Chip,
+  Card,
+  CardContent,
+  Grid,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  TextField,
+  FormControl,
+  Select,
+  MenuItem,
+  InputLabel,
+  List,
+  ListItem,
+  ListItemText,
+  ListItemIcon,
+  ListItemSecondaryAction,
+  IconButton,
+  Avatar,
+  Switch,
+  FormControlLabel
+} from '@mui/material';
+import AddIcon from '@mui/icons-material/Add';
+import ReceiptIcon from '@mui/icons-material/Receipt';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import RestaurantMenuIcon from '@mui/icons-material/RestaurantMenu';
+import PeopleIcon from '@mui/icons-material/People';
+import AccessTimeIcon from '@mui/icons-material/AccessTime';
+import PaymentIcon from '@mui/icons-material/Payment';
+import LinkIcon from '@mui/icons-material/Link';
+import LinkOffIcon from '@mui/icons-material/LinkOff';
+import SplitscreenIcon from '@mui/icons-material/Splitscreen';
+
+// Importar componentes de divisão de conta
+import SplitBillManager from '../../components/payments/SplitBillManager';
+import SplitPaymentDialog from '../../components/payments/SplitPaymentDialog';
+import PersonAddIcon from '@mui/icons-material/PersonAdd';
+import SplitscreenIcon from '@mui/icons-material/Splitscreen';
+import DeleteIcon from '@mui/icons-material/Delete';
+import { useNavigate, useParams } from 'react-router-dom';
+import axios from 'axios';
+import { format } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
+import { useSocket } from '../../context/SocketContext';
+import { useAuth } from '../../context/AuthContext';
+import AppLayout from '../../components/layout/AppLayout';
+import SplitBillManager from '../../components/payments/SplitBillManager';
+import SplitPaymentDialog from '../../components/payments/SplitPaymentDialog';
+import SplitscreenIcon from '@mui/icons-material/Splitscreen';
+
+const TableService = () => {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const { emitTableUpdate, socket, emitRequestPayment } = useSocket();
+  
+  const [table, setTable] = useState(null);
+  const [orders, setOrders] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(null);
+  const [windowWidth, setWindowWidth] = useState(window.innerWidth);
+  
+  // Estados para gerenciar múltiplos garçons
+  const [waiters, setWaiters] = useState([]);
+  const [selectedWaiters, setSelectedWaiters] = useState([]);
+  const [openWaiterDialog, setOpenWaiterDialog] = useState(false);
+  
+  // Estados para juntar mesas
+  const [availableTables, setAvailableTables] = useState([]);
+  const [selectedTables, setSelectedTables] = useState([]);
+  const [openJoinDialog, setOpenJoinDialog] = useState(false);
+  
+  // Estados para divisão de contas
+  const [splitBillEnabled, setSplitBillEnabled] = useState(false);
+  const [divisions, setDivisions] = useState([]);
+  const [openSplitDialog, setOpenSplitDialog] = useState(false);
+  const [splitMethod, setSplitMethod] = useState('equal'); // 'equal', 'custom', 'byItem'
+  const [activeItems, setActiveItems] = useState([]);
+  const [splitPaymentDialog, setSplitPaymentDialog] = useState(false);
+  const [selectedDivisionForPayment, setSelectedDivisionForPayment] = useState(null);
+  const [loadingPayment, setLoadingPayment] = useState(false);
+  
+  // Estados de confirmação
+  const [confirmationDialog, setConfirmationDialog] = useState({
+    open: false,
+    title: '',
+    message: '',
+    onConfirm: null
+  });
+  
+  // Estados para abrir mesa
+  const [selectedItems, setSelectedItems] = useState([]);
+  const [customerCount, setCustomerCount] = useState(1);
+  
+  // Função para formatar valores monetários
+  const formatCurrency = (value) => {
+    return new Intl.NumberFormat('pt-BR', {
+      style: 'currency',
+      currency: 'BRL'
+    }).format(value);
+  };
+
+  // Função para calcular o total da conta
+  const calculateTotal = () => {
+    if (!orders || orders.length === 0) return 0;
+    return orders.reduce((sum, order) => sum + (order.totalAmount || 0), 0);
+  };
+  
+  // Função para calcular os valores de cada divisão
+  const calculateDivisionAmounts = () => {
+    if (!divisions || divisions.length === 0) return [];
+    
+    const result = [...divisions];
+    const totalBill = calculateTotal();
+    
+    if (splitMethod === 'equal') {
+      // Divisão igual entre todos
+      const equalAmount = totalBill / divisions.length;
+      return result.map(division => ({
+        ...division,
+        percentage: 100 / divisions.length,
+        totalAmount: parseFloat(equalAmount.toFixed(2))
+      }));
+    } 
+    else if (splitMethod === 'custom') {
+      // Divisão percentual personalizada
+      return result.map(division => ({
+        ...division,
+        totalAmount: parseFloat((totalBill * (division.percentage / 100)).toFixed(2))
+      }));
+    }
+    
+    return result;
+  };
+  
+  // Função para buscar dados da mesa
+  const fetchTable = async () => {
+    try {
+      const tableResponse = await axios.get(`/api/tables/${id}`);
+      setTable(tableResponse.data);
+      return tableResponse.data;
+    } catch (err) {
+      console.error('Error fetching table:', err);
+      setError('Erro ao carregar dados da mesa.');
+      throw err;
+    }
+  };
+  
+  // Fetch table and orders data
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setLoading(true);
+        
+        // Fetch table data
+        const tableResponse = await axios.get(`/api/tables/${id}`);
+        setTable(tableResponse.data);
+        
+        // Fetch orders for this table
+        const ordersResponse = await axios.get(`/api/orders/table/${id}`);
+        // Filtrar os pedidos pagos - não mostrar na tela do garçom
+        const filteredOrders = ordersResponse.data.filter(order => 
+          order.status === 'active' || 
+          (order.status === 'completed' && (!order.paymentStatus || order.paymentStatus !== 'paid'))
+        );
+        setOrders(filteredOrders);
+        
+        setError(null);
+      } catch (err) {
+        console.error('Error fetching table data:', err);
+        setError('Erro ao carregar dados da mesa. Tente novamente.');
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchData();
+    
+    // Poll for updates
+    const interval = setInterval(async () => {
+      try {
+        // Buscar dados atualizados da mesa
+        const tableResponse = await axios.get(`/api/tables/${id}`);
+        setTable(tableResponse.data);
+        
+        // Buscar pedidos atualizados com o mesmo filtro
+        const ordersResponse = await axios.get(`/api/orders/table/${id}`);
+        // Filtrar pedidos pagos para não mostrar na tela do garçom
+        const filteredOrders = ordersResponse.data.filter(order => 
+          order.status === 'active' || 
+          (order.status === 'completed' && (!order.paymentStatus || order.paymentStatus !== 'paid'))
+        );
+        setOrders(filteredOrders);
+        
+        setError(null);
+      } catch (err) {
+        console.error('Error updating table data:', err);
+      }
+    }, 30000); // Update every 30 seconds
+    
+    return () => clearInterval(interval);
+  }, [id]);
+  
+  // Buscar lista de garçons disponíveis
+  useEffect(() => {
+    const fetchWaiters = async () => {
+      try {
+        const response = await axios.get('/api/users/role/waiters');
+        setWaiters(response.data);
+      } catch (err) {
+        console.error('Error fetching waiters:', err);
+        // Definir pelo menos o usuário atual como garçom disponível
+        // para permitir que a funcionalidade continue funcionando
+        if (user) {
+          setWaiters([user]);
+        }
+      }
+    };
+    
+    fetchWaiters();
+  }, [user]);
+  
+  // Buscar mesas disponíveis para juntar
+  useEffect(() => {
+    const fetchAvailableTables = async () => {
+      if (!table) return;
+      
+      try {
+        const response = await axios.get('/api/tables');
+        // Filtrar apenas mesas disponíveis na mesma seção
+        const availableTables = response.data.filter(t => 
+          t.status === 'available' && 
+          t.section === table.section && 
+          t._id !== table._id
+        );
+        setAvailableTables(availableTables);
+      } catch (err) {
+        console.error('Error fetching available tables:', err);
+      }
+    };
+    
+    fetchAvailableTables();
+  }, [table]);
+  
+  // Atualizar estado da divisão de contas quando a mesa mudar
+  useEffect(() => {
+    if (table && table.splitBills) {
+      setSplitBillEnabled(table.splitBills.enabled);
+      setDivisions(table.splitBills.divisions || []);
+    }
+  }, [table]);
+  
+  // Função para enviar evento de atualização de mesa via socket
+  useEffect(() => {
+    // Registrar no socket quando o componente montar
+    if (socket) {
+      socket.emit('join', 'waiter');
+    }
+    
+    return () => {
+      // Limpeza quando o componente desmontar
+      if (socket) {
+        socket.off('tableStatusChanged');
+      }
+    };
+  }, [socket]);
+  
+  // Juntar mesas
+  const handleJoinTables = async () => {
+    if (selectedTables.length === 0) return;
+    
+    try {
+      setLoading(true);
+      
+      // Garantir que os IDs sejam strings para evitar problemas de comparação
+      const mainTableId = table._id.toString();
+      const selectedTableIds = selectedTables.map(id => id.toString());
+      
+      // Obter os números das mesas selecionadas para exibir na mensagem de sucesso
+      const selectedTablesInfo = availableTables
+        .filter(t => selectedTableIds.includes(t._id.toString()))
+        .map(t => t.tableNumber);
+      
+      // Log para depuração
+      console.log('Tentando juntar mesas:', { mainTableId, selectedTableIds });
+      
+      await axios.post('/api/tables/join', { 
+        tableIds: [mainTableId, ...selectedTableIds]
+      });
+      
+      // Buscar mesa atualizada
+      await fetchTable();
+      
+      // Fechar diálogo e limpar seleção
+      setOpenJoinDialog(false);
+      setSelectedTables([]);
+      
+      // Notificar outros usuários
+      emitTableUpdate();
+      
+      // Mostrar mensagem de sucesso
+      setSuccess(`Mesas unidas com sucesso! Mesa ${table.tableNumber} foi unida com as mesas ${selectedTablesInfo.join(', ')}.`);
+    } catch (err) {
+      console.error('Error joining tables:', err);
+      let errorMessage = 'Erro ao juntar mesas.';
+      
+      // Obter mensagem detalhada do erro se disponível
+      if (err.response && err.response.data && err.response.data.message) {
+        errorMessage = err.response.data.message;
+      }
+      
+      setError(errorMessage);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // Separar mesas
+  const handleUnjoinTables = async () => {
+    if (!table || !table.isJoined) return;
+    
+    try {
+      setLoading(true);
+      
+      await axios.post(`/api/tables/unjoin/${table._id}`);
+      
+      // Buscar mesa atualizada
+      await fetchTable();
+      
+      // Notificar outros usuários
+      emitTableUpdate();
+    } catch (err) {
+      console.error('Error unjoining tables:', err);
+      setError(err.response?.data?.message || 'Erro ao separar mesas.');
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // Adicionar/remover garçons da mesa
+  const handleUpdateWaiters = async () => {
+    try {
+      setLoading(true);
+      
+      // Garantir que o garçom atual esteja incluído
+      if (!selectedWaiters.includes(user._id)) {
+        selectedWaiters.push(user._id);
+      }
+      
+      await axios.post(`/api/tables/${id}/waiters`, {
+        waiters: selectedWaiters,
+        action: 'add'
+      });
+      
+      // Buscar mesa atualizada
+      await fetchTable();
+      
+      // Fechar diálogo
+      setOpenWaiterDialog(false);
+      
+      // Notificar outros usuários
+      emitTableUpdate();
+    } catch (err) {
+      console.error('Error updating waiters:', err);
+      setError(err.response?.data?.message || 'Erro ao atualizar garçons.');
+        
+        result[index].totalAmount = parseFloat(divisionTotal.toFixed(2));
+      }
+    });
+    
+    return result;
+  }
+  
+  return divisions;
+};
+
+// Gerenciar divisão de contas
+const handleSplitBill = async () => {
+  try {
+    setLoading(true);
+    
+    // Calcular valores antes de salvar
+    const calculatedDivisions = calculateDivisionAmounts();
+    
+    await axios.post(`/api/tables/${id}/split`, {
+      enabled: splitBillEnabled,
+      method: splitMethod,
+      divisions: calculatedDivisions
+    });
+    
+    // Buscar mesa atualizada
+    const updatedTable = await fetchTable();
+    
+    // Atualizar divisões locais
+    if (updatedTable.splitBills && updatedTable.splitBills.enabled) {
+      setSplitMethod(updatedTable.splitBills.method || 'equal');
+      setDivisions(updatedTable.splitBills.divisions || []);
+    }
+    
+    // Fechar diálogo
+    setOpenSplitDialog(false);
+    
+    // Exibir mensagem de sucesso
+    setSuccess('Divisão de conta atualizada com sucesso');
+    
+    // Notificar outros usuários
+    emitTableUpdate();
+  } catch (err) {
+    console.error('Error updating split bill:', err);
+    setError(err.response?.data?.message || 'Erro ao atualizar divisão de contas.');
+  } finally {
+    setLoading(false);
+  }
+};
+
+// Adicionar nova divisão de conta
+const handleAddDivision = () => {
+  const newDivision = {
+    name: `Cliente ${divisions.length + 1}`,
+    waiter: user._id,
+    items: [],
+    percentage: 100 / (divisions.length + 1), // Para divisão igual
+    totalAmount: 0 // Valor a pagar
+  };
+  
+  // Recalcular as porcentagens para manter igual
+  const updatedDivisions = divisions.map(div => ({
+    ...div,
+    percentage: 100 / (divisions.length + 1)
+  }));
+  
+  setDivisions([...updatedDivisions, newDivision]);
+};
+
+// Remover divisão de conta
+const handleRemoveDivision = (index) => {
+  const newDivisions = [...divisions];
+  newDivisions.splice(index, 1);
+  
+  // Recalcular as porcentagens para manter igual
+  const updatedDivisions = newDivisions.map(div => ({
+    ...div,
+    percentage: 100 / newDivisions.length
+  }));
+  
+  setDivisions(updatedDivisions);
+};
+
+// Solicitar pagamento para uma divisão específica
+const handleRequestDivisionPayment = async (divisionIndex) => {
+  try {
+    setError(null);
+    setLoading(true);
+    
+    const division = divisions[divisionIndex];
+    if (!division) {
+      throw new Error('Divisão não encontrada');
+    }
+    
+    // Calcular o valor desta divisão
+    const calculatedDivisions = calculateDivisionAmounts();
+    const divisionAmount = calculatedDivisions[divisionIndex].totalAmount;
+    
+    // Emitir notificação de pagamento para o administrador e outros garçons
+    emitRequestPayment({
+      tableId: id,
+      tableNumber: table.tableNumber,
+      totalAmount: divisionAmount,
+      requestedBy: user.name,
+      timestamp: new Date().toISOString(),
+      divisionName: division.name,
+      isDivided: true
+    });
+    
+    // Atualizar o status da divisão para 'pending_payment'
+    const updatedDivisions = [...divisions];
+    updatedDivisions[divisionIndex] = {
+      ...updatedDivisions[divisionIndex],
+      paymentStatus: 'pending',
+      totalAmount: divisionAmount
+    };
+    
+    await axios.post(`/api/tables/${id}/split`, {
+      enabled: splitBillEnabled,
+      method: splitMethod,
+      divisions: updatedDivisions
+    });
+    
+    // Fechar o diálogo
+    setSplitPaymentDialog(false);
+    setSelectedDivisionForPayment(null);
+    
+    // Atualizar as divisões locais
+    setDivisions(updatedDivisions);
+    
+    // Mostrar confirmação
+    setConfirmationDialog({
+      open: true,
+      title: 'Pagamento Parcial Solicitado',
+      message: `Pagamento de R$ ${divisionAmount.toFixed(2)} para ${division.name} foi solicitado. A recepção e outros garçons serão notificados.`,
+      onConfirm: () => {
+        setConfirmationDialog({ ...confirmationDialog, open: false });
+      }
+    });
+  } catch (err) {
+    console.error('Error requesting division payment:', err);
+    setError('Erro ao solicitar pagamento parcial. Tente novamente.');
+  } finally {
+    setLoadingPayment(false);
+  }
+};
+
+// Solicitar pagamento para a mesa completa
+const handleRequestFullPayment = async () => {
+  try {
+    setLoadingPayment(true);
+    setError(null);
+    
+    // Atualizar status dos pedidos ativos para completados
+    const activeOrders = orders.filter(order => order.status === 'active');
+    const totalAmount = calculateTotal();
+    
+    for (const order of activeOrders) {
+      await axios.put(`/api/orders/${order._id}`, {
+        status: 'completed',
+        paymentStatus: 'pending'
+      });
+    }
+    
+    // Buscar pedidos atualizados
+    const ordersResponse = await axios.get(`/api/orders/table/${id}`);
+    const filteredOrders = ordersResponse.data.filter(order => 
+      order.status === 'active' || 
+      (order.status === 'completed' && (!order.paymentStatus || order.paymentStatus !== 'paid'))
+    );
+    setOrders(filteredOrders);
+    
+    // Fechar o diálogo
+    setSplitPaymentDialog(false);
+    
+    // Emitir notificação de pagamento
+    emitRequestPayment({
+      tableId: id,
+      tableNumber: table.tableNumber,
+      totalAmount: totalAmount,
+      requestedBy: user.name,
+      timestamp: new Date().toISOString(),
+      isDivided: false
+    });
+    
+    // Mostrar confirmação
+    setConfirmationDialog({
+      open: true,
+      title: 'Pagamento Completo Solicitado',
+      message: `Pagamento total de ${formatCurrency(totalAmount)} foi solicitado. A recepção e outros garçons serão notificados.`,
+      onConfirm: () => {
+        setConfirmationDialog({ ...confirmationDialog, open: false });
+      }
+    });
+  } catch (err) {
+    console.error('Error requesting full payment:', err);
+    setError('Erro ao solicitar pagamento completo. Tente novamente.');
+  } finally {
+    setLoadingPayment(false);
+  }
+};
+
+// Handle closing the table and requesting payment
+const handleRequestPayment = async () => {
+  try {
+    setError(null);
+    
+    // Verificar se tem divisão de conta habilitada
+    if (splitBillEnabled && divisions.length > 0) {
+      // Mostrar diálogo para selecionar qual divisão pagar
+      setSplitPaymentDialog(true);
+      return;
+    }
+    
+    // Pagamento normal (sem divisão)
+    const activeOrders = orders.filter(order => order.status === 'active');
+    
+    if (activeOrders.length === 0 && table.paymentStatus !== 'pending') {
+      setError('Não há pedidos ativos para pagamento.');
+      return;
+    }
+
+    // Atualizar status dos pedidos ativos para completados
+    for (const order of activeOrders) {
+      await axios.put(`/api/orders/${order._id}`, {
+        status: 'completed',
+        paymentStatus: 'pending'
+      });
+    }
+    
+    // Calcular valor total
+    const totalAmount = calculateTotal();
+    
+    // Atualizar status da mesa
+    await axios.put(`/api/tables/${id}`, {
+      ...table,
+      paymentStatus: 'pending'
+    });
+    
+    // Buscar dados atualizados
+    await fetchTable();
+    await fetchOrders();
+    
+    // Emitir evento de solicitação de pagamento
+    emitRequestPayment({
+      tableId: id,
+      tableNumber: table.tableNumber,
+      totalAmount,
+      requestedBy: user.name,
+      timestamp: new Date().toISOString()
+    });
+    
+    // Show confirmation
+    setConfirmationDialog({
+      open: true,
+      title: 'Pagamento Solicitado',
+      message: `Pagamento de ${formatCurrency(totalAmount)} foi solicitado. A recepção e outros garçons serão notificados.`,
+      onConfirm: () => {
+        setConfirmationDialog({ ...confirmationDialog, open: false });
+      }
+    });
+  } catch (err) {
+    console.error('Error requesting payment:', err);
+    setError('Erro ao solicitar pagamento. Tente novamente.');
+  }
+};
+
+// Função para juntar mesas
+const handleJoinTables = async () => {
+  try {
+    setLoading(true);
+    setError(null);
+    
+    // Implementação pendente
+    
+    setLoading(false);
+  } catch (err) {
+    console.error('Error joining tables:', err);
+    setError('Erro ao juntar mesas. Tente novamente.');
+    setLoading(false);
+  }
+};
+
+// Resto do código do componente permanece o mesmo
+        <Switch
+          checked={splitBillEnabled}
+          onChange={(e) => setSplitBillEnabled(e.target.checked)}
+          color="primary"
+        />
+      }
+      label="Habilitar divisão de conta"
+      sx={{ mb: 2 }}
+    />
+    
+    {splitBillEnabled && (
+      <>
+        <FormControl fullWidth margin="normal">
+          <InputLabel>Método de Divisão</InputLabel>
+          <Select
+            value={splitMethod}
+            onChange={(e) => setSplitMethod(e.target.value)}
+            label="Método de Divisão"
+          >
+            <MenuItem value="equal">Divisão Igual</MenuItem>
+            <MenuItem value="custom">Personalizado (por %)</MenuItem>
+            <MenuItem value="byItem">Por Item do Pedido</MenuItem>
+          </Select>
+        </FormControl>
+        
+        <Typography variant="subtitle1" gutterBottom sx={{ mt: 2 }}>
+          Divisões de Conta
+        </Typography>
+        
+        <List>
+          {divisions.map((division, index) => {
+            // Calcular valores baseado no método
+            const calculatedDivisions = calculateDivisionAmounts();
+            const divisionAmount = calculatedDivisions[index]?.totalAmount || 0;
+            
+            return (
+              <ListItem key={index}>
+                <ListItemIcon>
+                  <Avatar>{index + 1}</Avatar>
+                </ListItemIcon>
+                <ListItemText
+                  primary={
+                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                      <TextField
+                        variant="standard"
+                        value={division.name}
+                        onChange={(e) => {
+                          const newDivisions = [...divisions];
+                          newDivisions[index].name = e.target.value;
+                          setDivisions(newDivisions);
+                        }}
+                        sx={{ mr: 2 }}
+                      />
+                      {splitMethod === 'custom' && (
+                        <TextField
+                          type="number"
+                          variant="outlined"
+                          size="small"
+                          InputProps={{
+                            endAdornment: <Typography>%</Typography>,
+                            inputProps: { min: 1, max: 100, step: 1 }
+                          }}
+                          value={division.percentage || 0}
+                          onChange={(e) => {
+                            const newPercentage = parseInt(e.target.value) || 0;
+                            const newDivisions = [...divisions];
+                            newDivisions[index].percentage = newPercentage;
+                            setDivisions(newDivisions);
+                          }}
+                          sx={{ width: '80px' }}
+                        />
+                      )}
+                    </Box>
+                  }
+                  secondary={
+                    <Box>
+                      <Typography variant="body2">
+                        Responsável: {user.name}
+                      </Typography>
+                      <Typography variant="body2" color="primary">
+                        Valor: {formatCurrency(divisionAmount)}
+                      </Typography>
+                      {division.paymentStatus && (
+                        <Chip 
+                          size="small" 
+                          label={division.paymentStatus === 'pending' ? 'Pagamento Pendente' : 'Pago'} 
+                          color={division.paymentStatus === 'pending' ? 'warning' : 'success'}
+                          sx={{ mt: 0.5 }}
+                        />
+                      )}
+                    </Box>
+                  }
+                />
+                <ListItemSecondaryAction>
+                  <IconButton 
+                    edge="end" 
+                    aria-label="delete"
+                    onClick={() => handleRemoveDivision(index)}
+                  >
+                    <DeleteIcon />
+                  </IconButton>
+                </ListItemSecondaryAction>
+              </ListItem>
+            );
+          })}
+        </List>
+        
+        <Button
+          variant="outlined"
+          startIcon={<AddIcon />}
+          onClick={handleAddDivision}
+          fullWidth
+        >
+          Adicionar Divisão
+        </Button>
+        
+        {splitMethod === 'byItem' && (
+          <Typography variant="body2" color="primary" sx={{ mt: 2 }}>
+            Nota: No modo "Por Item", você deve associar os itens a cada cliente ao fazer o pedido.
+          </Typography>
+        )}
+        
+        {splitMethod === 'custom' && (
+          <Typography variant="body2" color="error" sx={{ mt: 2 }}>
+            A soma dos percentuais deve ser 100%. Total atual: 
+            {divisions.reduce((sum, div) => sum + (div.percentage || 0), 0)}%
+          </Typography>
+        )}
+      </>
+    )}
+  </DialogContent>
+  <DialogActions>
+    <Button 
+      onClick={() => setOpenSplitDialog(false)} 
+      color="inherit"
+    >
+      Cancelar
+    </Button>
+    <Button 
+      onClick={handleSplitBill} 
+      color="primary"
+      variant="contained"
+      disabled={loading || 
+        (splitBillEnabled && divisions.length === 0) ||
+        (splitMethod === 'custom' && 
+          Math.abs(divisions.reduce((sum, div) => sum + (div.percentage || 0), 0) - 100) > 1)
+      }
+      startIcon={loading ? <CircularProgress size={20} /> : <SplitscreenIcon />}
+    >
+      Salvar
+    </Button>
+  </DialogActions>
+</Dialog>
+
+// Dialog para selecionar qual divisão pagar
+<Dialog
+  open={splitPaymentDialog}
+  onClose={() => setSplitPaymentDialog(false)}
+  fullWidth
+  maxWidth="sm"
+>
+  <DialogTitle>Solicitar Pagamento</DialogTitle>
+  <DialogContent>
+    <Typography variant="subtitle1" gutterBottom>
+      Selecione uma opção de pagamento:
+    </Typography>
+    
+    <List>
+      {/* Opção de pagamento completo */}
+      <ListItem button onClick={handleRequestFullPayment}>
+        <ListItemIcon>
+          <PaymentIcon color="primary" />
+        </ListItemIcon>
+        <ListItemText 
+          primary="Pagamento Completo" 
+          secondary={`Valor total: ${formatCurrency(calculateTotal())}`} 
+        />
+      </ListItem>
+      
+      <Divider sx={{ my: 1 }} />
+      
+      <Typography variant="subtitle2" sx={{ mt: 1, mb: 1, pl: 2 }}>
+        Pagamentos Individuais:
+      </Typography>
+      
+      {/* Lista de divisões para pagamento individual */}
+      {calculateDivisionAmounts().map((division, index) => (
+        <ListItem 
+          button 
+          key={index} 
+          onClick={() => handleRequestDivisionPayment(index)}
+          disabled={division.paymentStatus === 'paid'}
+        >
+          <ListItemIcon>
+            <Avatar>{index + 1}</Avatar>
+          </ListItemIcon>
+          <ListItemText 
+            primary={division.name} 
+            secondary={
+              <>
+                {`Valor: ${formatCurrency(division.totalAmount)}`}
+                {division.paymentStatus && (
+                  <Box component="span" sx={{ display: 'block', mt: 0.5 }}>
+                    <Chip 
+                      size="small" 
+                      label={division.paymentStatus === 'pending' ? 'Pagamento Pendente' : 'Pago'} 
+                      color={division.paymentStatus === 'pending' ? 'warning' : 'success'}
+                    />
+                  </Box>
+                )}
+              </>
+            } 
+          />
+        </ListItem>
+      ))}
+    </List>
+  </DialogContent>
+  <DialogActions>
+    <Button onClick={() => setSplitPaymentDialog(false)} color="inherit">
+      Cancelar
+    </Button>
+  </DialogActions>
+</Dialog>
+          </Typography>
+          <FormControl fullWidth sx={{ mt: 1 }}>
+            <TextField
+              label="Número de Clientes"
+              type="number"
+              value={customerCount}
+              onChange={(e) => {
+                // Permitir campo vazio temporariamente (para poder apagar o 1)
+                const value = e.target.value === '' ? '' : parseInt(e.target.value);
+                setCustomerCount(value);
+              }}
+              onBlur={() => {
+                // Se o campo estiver vazio ou for menor que 1 ao perder o foco,
+                // definir o valor mínimo de 1
+                if (customerCount === '' || customerCount < 1) {
+                  setCustomerCount(1);
+                } else if (customerCount > table.capacity) {
+                  setCustomerCount(table.capacity);
+                }
+              }}
+              inputProps={{
+                min: 1,
+                max: table.capacity,
+                // Remover as setas de incremento/decremento que podem dificultar
+                // a edição em dispositivos móveis
+                style: { WebkitAppearance: 'none', MozAppearance: 'textfield' }
+              }}
+            />
+          </FormControl>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpenTableDialog(false)}>Cancelar</Button>
+          <Button onClick={handleOpenTable} variant="contained">Confirmar</Button>
+        </DialogActions>
+      </Dialog>
+      
+      {/* Confirmation Dialog */}
+      <Dialog open={confirmationDialog.open} onClose={() => setConfirmationDialog({ ...confirmationDialog, open: false })}>
+        <DialogTitle>{confirmationDialog.title}</DialogTitle>
+        <DialogContent>
+          <Typography>{confirmationDialog.message}</Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => confirmationDialog.onConfirm && confirmationDialog.onConfirm()} variant="contained">
+            OK
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Dialog for Split Bill Configuration */}
+      <Dialog
+        open={openSplitDialog}
+        onClose={() => setOpenSplitDialog(false)}
+        fullWidth
+        maxWidth="sm"
+      >
+        <DialogTitle>Divisão de Conta - Mesa {table?.tableNumber}</DialogTitle>
+        <DialogContent>
+          <SplitBillManager
+            enabled={splitBillEnabled}
+            onToggleEnabled={setSplitBillEnabled}
+            divisions={divisions}
+            onUpdateDivisions={setDivisions}
+            totalAmount={calculateTotal()}
+            method={splitMethod}
+            onMethodChange={setSplitMethod}
+            formatCurrency={formatCurrency}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button 
+            onClick={() => setOpenSplitDialog(false)} 
+            color="inherit"
+          >
+            Cancelar
+          </Button>
+          <Button 
+            onClick={handleSplitBill} 
+            color="primary"
+            variant="contained"
+            disabled={loading || 
+              (splitBillEnabled && divisions.length === 0) ||
+              (splitMethod === 'custom' && 
+                Math.abs(divisions.reduce((sum, div) => sum + (div.percentage || 0), 0) - 100) > 1)
+            }
+            startIcon={loading ? <CircularProgress size={20} /> : <SplitscreenIcon />}
+          >
+            Salvar
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Dialog para selecionar qual divisão pagar */}
+      <SplitPaymentDialog
+        open={splitPaymentDialog}
+        onClose={() => setSplitPaymentDialog(false)}
+        divisions={divisions.length > 0 ? calculateDivisionAmounts() : []}
+        totalAmount={calculateTotal()}
+        onRequestFullPayment={handleRequestFullPayment}
+        onRequestDivisionPayment={handleRequestDivisionPayment}
+        loading={loadingPayment}
+        formatCurrency={formatCurrency}
+      />
+    </AppLayout>
+  );
+};
+
+export default TableService;

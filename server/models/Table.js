@@ -34,12 +34,26 @@ const TableSchema = new mongoose.Schema({
       type: Boolean, 
       default: false 
     },
+    method: {
+      type: String,
+      enum: ['equal', 'custom', 'byItem'],
+      default: 'equal'
+    },
     divisions: [{
       name: String,
       waiter: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User'
       },
+      percentage: Number,
+      totalAmount: Number,
+      paymentStatus: {
+        type: String,
+        enum: ['pending', 'paid'],
+        default: null
+      },
+      paidAmount: Number,
+      paidAt: Date,
       items: [{
         type: mongoose.Schema.Types.ObjectId,
         ref: 'OrderItem'

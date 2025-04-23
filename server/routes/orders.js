@@ -338,6 +338,85 @@ router.get('/table/:tableId', protect, async (req, res) => {
   }
 });
 
+// @route   GET /api/orders/payment/pending
+// @desc    Get all orders with pending payment status
+// @access  Private
+router.get('/payment/pending', protect, async (req, res) => {
+  try {
+    const pendingPaymentOrders = await Order.find({
+      paymentStatus: 'pending',
+      status: 'completed'
+    })
+      .populate('table', 'tableNumber')
+      .populate('waiter', 'name')
+      .populate('items.menuItem', 'name price category')
+      .sort({ updatedAt: -1 });
+    
+    res.json(pendingPaymentOrders);
+  } catch (error) {
+    console.error('Get pending payment orders error:', error);
+    res.status(500).json({ message: 'Erro no servidor' });
+  }
+});
+
+// @route   GET /api/orders/payment/history
+// @desc    Get history of all orders with payment status (pending and paid)
+// @access  Private
+router.get('/payment/history', protect, async (req, res) => {
+  try {
+    // Buscar tanto pedidos pendentes quanto pagos
+    const paymentOrders = await Order.find({
+      status: 'completed',
+      paymentStatus: { $in: ['pending', 'paid'] }
+    })
+      .populate('table', 'tableNumber')
+      .populate('waiter', 'name')
+      .populate('items.menuItem', 'name price category')
+      .sort({ updatedAt: -1 });
+    
+    res.json(paymentOrders);
+  } catch (error) {
+    console.error('Get payment history error:', error);
+    res.status(500).json({ message: 'Erro no servidor' });
+  }
+});
+
+// @route   DELETE /api/orders/:id/payment
+// @desc    Excluir um pedido de pagamento (disponível para garçons e admins)
+// @access  Private
+router.delete('/:id/payment', protect, async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id);
+    if (!order) {
+      return res.status(404).json({ message: 'Pedido não encontrado' });
+    }
+    
+    // Verificar se o usuário é o garçom que fez o pedido ou um admin
+    const isOrderWaiter = order.waiter && order.waiter.toString() === req.user._id.toString();
+    if (!isOrderWaiter && req.user.role !== 'admin' && req.user.role !== 'superadmin') {
+      return res.status(403).json({ 
+        message: 'Você não tem permissão para excluir este pedido' 
+      });
+    }
+    
+    // Atualizar status da mesa se for o pedido atual
+    const table = await Table.findById(order.table);
+    if (table && table.currentOrder && table.currentOrder.toString() === order._id.toString()) {
+      table.status = 'available';
+      table.currentOrder = null;
+      await table.save();
+    }
+    
+    // Excluir o pedido
+    await Order.deleteOne({ _id: order._id });
+    
+    res.json({ message: 'Pedido excluído com sucesso' });
+  } catch (error) {
+    console.error('Delete payment order error:', error);
+    res.status(500).json({ message: 'Erro no servidor' });
+  }
+});
+
 // @route   GET /api/orders/waiter/:waiterId
 // @desc    Get orders for a specific waiter
 // @access  Private/Superadmin

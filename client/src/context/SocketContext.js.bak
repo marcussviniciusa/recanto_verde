@@ -70,8 +70,7 @@ export function SocketProvider({ children }) {
           addNotification({
             type: 'table',
             message: `Mesa ${data.tableNumber} agora está ${data.status === 'available' ? 'disponível' : 'ocupada'}`,
-            data,
-            priority: 'normal'
+            data
           });
         } else {
           console.warn('Recebidos dados inválidos para tableUpdated:', data);
@@ -85,9 +84,7 @@ export function SocketProvider({ children }) {
           addNotification({
             type: 'order',
             message: `Novo pedido para a mesa ${data.tableNumber}`,
-            data,
-            priority: 'high',
-            showToast: true
+            data
           });
         } else {
           console.warn('Recebidos dados inválidos para orderNotification:', data);
@@ -98,14 +95,10 @@ export function SocketProvider({ children }) {
       socketInstance.on('paymentRequestNotification', (data) => {
         console.log('Payment request:', data);
         if (data && data.tableNumber) {
-          // Garantir que totalAmount é um número válido antes de chamar toFixed
-          const amount = typeof data.totalAmount === 'number' ? data.totalAmount.toFixed(2) : '0.00';
           addNotification({
             type: 'payment',
-            message: `Solicitação de pagamento para mesa ${data.tableNumber} - R$ ${amount}`,
-            data,
-            priority: 'high',
-            showToast: true
+            message: `Solicitação de pagamento para mesa ${data.tableNumber} - R$ ${data.totalAmount.toFixed(2)}`,
+            data
           });
         } else {
           console.warn('Recebidos dados inválidos para paymentRequestNotification:', data);
@@ -147,14 +140,10 @@ export function SocketProvider({ children }) {
       socketInstance.on('paymentRequestNotification', (data) => {
         console.log('Payment request:', data);
         if (data && data.tableNumber) {
-          // Garantir que totalAmount é um número válido antes de chamar toFixed
-          const amount = typeof data.totalAmount === 'number' ? data.totalAmount.toFixed(2) : '0.00';
           addNotification({
             type: 'payment',
-            message: `Solicitação de pagamento para mesa ${data.tableNumber} - R$ ${amount}`,
-            data,
-            priority: 'high',
-            showToast: true
+            message: `Solicitação de pagamento para mesa ${data.tableNumber} - R$ ${data.totalAmount.toFixed(2)}`,
+            data
           });
         } else {
           console.warn('Recebidos dados inválidos para paymentRequestNotification:', data);
@@ -170,8 +159,7 @@ export function SocketProvider({ children }) {
             message: data.tableNumber 
               ? `Mesa ${data.tableNumber} agora está ${data.status === 'available' ? 'disponível' : 'ocupada'}`
               : `Status de mesa atualizado para ${data.status === 'available' ? 'disponível' : 'ocupada'}`,
-            data,
-            priority: 'normal'
+            data
           });
         } else {
           console.warn('Recebidos dados inválidos para tableStatusChanged:', data);
@@ -191,14 +179,10 @@ export function SocketProvider({ children }) {
 
   // Reproduzir som de notificação
   const playNotificationSound = useCallback(() => {
-    try {
-      if (soundEnabled && notificationAudio && notificationAudio.current) {
-        notificationAudio.current.play().catch(err => {
-          console.warn('Erro ao reproduzir som de notificação:', err);
-        });
-      }
-    } catch (err) {
-      console.warn('Erro ao tentar reproduzir som:', err);
+    if (soundEnabled) {
+      notificationAudio.current.play().catch(err => {
+        console.warn('Erro ao reproduzir som de notificação:', err);
+      });
     }
   }, [soundEnabled]);
 
@@ -221,47 +205,33 @@ export function SocketProvider({ children }) {
 
   // Add notification with priority
   const addNotification = useCallback((notification) => {
-    if (!notification) return null;
+    // Checar se é uma notificação de alta prioridade
+    const isPriority = notification.priority === 'high';
     
-    try {
-      // Checar se é uma notificação de alta prioridade
-      const isPriority = notification.priority === 'high';
-      
-      // Criar nova notificação
-      const newNotification = {
-        id: Date.now(),
-        timestamp: new Date(),
-        read: false,
-        priority: notification.priority || 'normal',
-        ...notification
-      };
-      
-      // Atualizar o estado
-      setNotifications((prev) => [newNotification, ...prev]);
-      
-      // Reproduzir som para notificações prioritárias
-      if (isPriority && soundEnabled) {
-        // Usamos setTimeout para evitar a dependência circular
-        setTimeout(() => {
-          if (notificationAudio && notificationAudio.current) {
-            notificationAudio.current.play().catch(err => {
-              console.warn('Erro ao reproduzir som:', err);
-            });
-          }
-        }, 0);
-      }
-      
-      // Para notificações de alta prioridade, também mostrar um toast
-      if (isPriority && notification.showToast) {
-        // A função de exibir toast será implementada na UI
-      }
-      
-      return newNotification.id;
-    } catch (err) {
-      console.error('Erro ao adicionar notificação:', err);
-      return null;
+    // Criar nova notificação
+    const newNotification = {
+      id: Date.now(),
+      timestamp: new Date(),
+      read: false,
+      priority: notification.priority || 'normal',
+      ...notification
+    };
+    
+    // Atualizar o estado
+    setNotifications((prev) => [newNotification, ...prev]);
+    
+    // Reproduzir som para todas as notificações ou apenas as prioritárias
+    if (isPriority || soundEnabled) {
+      playNotificationSound();
     }
-  }, [soundEnabled]);
+    
+    // Para notificações de alta prioridade, também mostrar um toast
+    if (isPriority && notification.showToast) {
+      // A função de exibir toast será implementada na UI
+    }
+    
+    return newNotification.id;
+  }, [playNotificationSound, soundEnabled]);
 
   // Mark notification as read
   const markAsRead = useCallback((notificationId) => {

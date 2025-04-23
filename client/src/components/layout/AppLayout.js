@@ -1,14 +1,17 @@
 import React, { useState } from 'react';
-import { Box, CssBaseline } from '@mui/material';
-import { useLocation } from 'react-router-dom';
+import { Box, CssBaseline, Fab, Tooltip } from '@mui/material';
+import { useLocation, useNavigate } from 'react-router-dom';
+import TableRestaurantIcon from '@mui/icons-material/TableRestaurant';
 import Sidebar from './Sidebar';
 import Header from './Header';
 import { useAuth } from '../../context/AuthContext';
 
 // Versão simplificada do layout - abordagem direta
 const AppLayout = ({ children }) => {
-  const [sidebarOpen, setSidebarOpen] = useState(true);
   const { user } = useAuth();
+  // Definir o valor inicial do sidebarOpen com base no papel do usuário
+  // Para garçons o menu começa fechado, para outros papéis começa aberto
+  const [sidebarOpen, setSidebarOpen] = useState(user?.role !== 'waiter');
   const location = useLocation();
   
   // Responsive drawer width
@@ -24,8 +27,15 @@ const AppLayout = ({ children }) => {
     setSidebarOpen(!sidebarOpen);
   };
 
+  const navigate = useNavigate();
+  
+  // Função para navegar para a página principal das mesas
+  const goToDashboard = () => {
+    navigate('/');
+  };
+  
   return (
-    <Box sx={{ display: 'flex' }}>
+    <Box sx={{ display: 'flex', position: 'relative' }}>
       <CssBaseline />
       
       <Header 
@@ -53,6 +63,26 @@ const AppLayout = ({ children }) => {
         }}
       >
         {children}
+        
+        {/* Botão flutuante para garçons irem para a página principal */}
+        {user?.role === 'waiter' && !location.pathname.endsWith('/') && (
+          <Tooltip title="Ir para Mesas" placement="left">
+            <Fab 
+              color="primary" 
+              aria-label="ir para mesas" 
+              onClick={goToDashboard}
+              sx={{
+                position: 'fixed',
+                bottom: 24,
+                right: 24,
+                zIndex: 1000,
+                boxShadow: '0 4px 8px rgba(0,0,0,0.3)'
+              }}
+            >
+              <TableRestaurantIcon />
+            </Fab>
+          </Tooltip>
+        )}
       </Box>
     </Box>
   );

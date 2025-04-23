@@ -1,0 +1,136 @@
+// Adicione o método para pagamento completo:
+const handleRequestFullPayment = async () => {
+  try {
+    setLoadingPayment(true);
+    
+    // Update all active orders to mark them for payment
+    const activeOrders = orders.filter(order => order.status === 'active');
+    
+    // Calcular o total da conta
+    const totalAmount = calculateTotal();
+    
+    for (const order of activeOrders) {
+      await axios.put(`/api/orders/${order._id}`, {
+        status: 'completed',
+        paymentStatus: 'pending'
+      });
+    }
+    
+    // Refresh orders
+    const ordersResponse = await axios.get(`/api/orders/table/${id}`);
+    const filteredOrders = ordersResponse.data.filter(order => 
+      order.status === 'active' || 
+      (order.status === 'completed' && (!order.paymentStatus || order.paymentStatus !== 'paid'))
+    );
+    setOrders(filteredOrders);
+    
+    // Fechar o diálogo
+    setSplitPaymentDialog(false);
+    
+    // Emitir notificação de pagamento
+    emitRequestPayment({
+      tableId: id,
+      tableNumber: table.tableNumber,
+      totalAmount: totalAmount,
+      requestedBy: user.name,
+      timestamp: new Date().toISOString(),
+      isDivided: false
+    });
+    
+    // Show confirmation
+    setConfirmationDialog({
+      open: true,
+      title: 'Pagamento Completo Solicitado',
+      message: `Pagamento total de R$ ${totalAmount.toFixed(2)} foi solicitado. A recepção e outros garçons serão notificados.`,
+      onConfirm: () => {
+        setConfirmationDialog({ ...confirmationDialog, open: false });
+      }
+    });
+  } catch (err) {
+    console.error('Error requesting full payment:', err);
+    setError('Erro ao solicitar pagamento completo. Tente novamente.');
+  } finally {
+    setLoadingPayment(false);
+  }
+};
+
+// Substitua o diálogo de divisão de conta por:
+// No JSX, substitua o Dialog para Split Bill por:
+
+{/* Dialog for Split Bill Configuration */}
+<Dialog
+  open={openSplitDialog}
+  onClose={() => setOpenSplitDialog(false)}
+  fullWidth
+  maxWidth="sm"
+>
+  <DialogTitle>Divisão de Conta - Mesa {table?.tableNumber}</DialogTitle>
+  <DialogContent>
+    <SplitBillManager
+      enabled={splitBillEnabled}
+      onToggleEnabled={setSplitBillEnabled}
+      divisions={divisions}
+      onUpdateDivisions={setDivisions}
+      totalAmount={calculateTotal()}
+      method={splitMethod}
+      onMethodChange={setSplitMethod}
+      formatCurrency={formatCurrency}
+    />
+  </DialogContent>
+  <DialogActions>
+    <Button 
+      onClick={() => setOpenSplitDialog(false)} 
+      color="inherit"
+    >
+      Cancelar
+    </Button>
+    <Button 
+      onClick={handleSplitBill} 
+      color="primary"
+      variant="contained"
+      disabled={loading || 
+        (splitBillEnabled && divisions.length === 0) ||
+        (splitMethod === 'custom' && 
+          Math.abs(divisions.reduce((sum, div) => sum + (div.percentage || 0), 0) - 100) > 1)
+      }
+      startIcon={loading ? <CircularProgress size={20} /> : <SplitscreenIcon />}
+    >
+      Salvar
+    </Button>
+  </DialogActions>
+</Dialog>
+
+{/* Dialog para selecionar qual divisão pagar */}
+<SplitPaymentDialog
+  open={splitPaymentDialog}
+  onClose={() => setSplitPaymentDialog(false)}
+  divisions={divisions}
+  totalAmount={calculateTotal()}
+  onRequestFullPayment={handleRequestFullPayment}
+  onRequestDivisionPayment={handleRequestDivisionPayment}
+  loading={loadingPayment}
+  formatCurrency={formatCurrency}
+/>
+
+// Ao carregar a mesa, adicione carregamento das divisões existentes:
+
+useEffect(() => {
+  if (table) {
+    if (table.splitBills) {
+      setSplitBillEnabled(table.splitBills.enabled);
+      setSplitMethod(table.splitBills.method || 'equal');
+      setDivisions(table.splitBills.divisions || []);
+    } else {
+      // Valores padrão
+      setSplitBillEnabled(false);
+      setSplitMethod('equal');
+      setDivisions([{
+        name: 'Cliente 1',
+        items: [],
+        percentage: 100,
+        totalAmount: 0
+      }]);
+    }
+  }
+}, [table]);
+

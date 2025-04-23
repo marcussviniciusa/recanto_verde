@@ -1,0 +1,321 @@
+// Adicione estas importações no início do arquivo
+import SplitBillManager from '../../components/payments/SplitBillManager';
+import SplitPaymentDialog from '../../components/payments/SplitPaymentDialog';
+import useSplitBill from '../../hooks/useSplitBill';
+
+// Dentro do componente TableService, substitua os estados relacionados à divisão por:
+// Remove estes estados:
+// const [splitBillEnabled, setSplitBillEnabled] = useState(false);
+// const [divisions, setDivisions] = useState([]);
+// const [openSplitDialog, setOpenSplitDialog] = useState(false);
+// const [splitMethod, setSplitMethod] = useState('equal');
+// const [splitPaymentDialog, setSplitPaymentDialog] = useState(false);
+
+// E adicione:
+const [openSplitDialog, setOpenSplitDialog] = useState(false);
+const [splitPaymentDialog, setSplitPaymentDialog] = useState(false);
+const [loadingPayment, setLoadingPayment] = useState(false);
+
+// Use o hook de divisão de conta que criamos
+const { 
+  splitEnabled: splitBillEnabled, 
+  setSplitEnabled: setSplitBillEnabled,
+  divisions,
+  setDivisions,
+  method: splitMethod,
+  setMethod: setSplitMethod,
+  totalAmount: splitTotalAmount,
+  setTotalAmount: setSplitTotalAmount,
+  addDivision: handleAddDivision,
+  removeDivision: handleRemoveDivision,
+  updateDivision
+} = useSplitBill(
+  calculateTotal(), 
+  table?.splitBills?.divisions || [], 
+  table?.splitBills?.method || 'equal'
+);
+
+// Sempre que o total ou os pedidos mudarem, atualizar o valor total da divisão
+useEffect(() => {
+  setSplitTotalAmount(calculateTotal());
+}, [orders]);
+
+// Efeito para carregar divisões existentes quando a mesa é carregada
+useEffect(() => {
+  if (table) {
+    if (table.splitBills) {
+      setSplitBillEnabled(table.splitBills.enabled);
+      setSplitMethod(table.splitBills.method || 'equal');
+      if (table.splitBills.divisions && table.splitBills.divisions.length > 0) {
+        setDivisions(table.splitBills.divisions);
+      }
+    }
+  }
+}, [table]);
+
+// Atualizar o método handleSplitBill
+const handleSplitBill = async () => {
+  try {
+    setLoading(true);
+    
+    await axios.post(`/api/tables/${id}/split`, {
+      enabled: splitBillEnabled,
+      method: splitMethod,
+      divisions: divisions
+    });
+    
+    // Buscar mesa atualizada
+    const updatedTable = await fetchTable();
+    
+    // Atualizar estados locais com base nos dados do servidor
+    if (updatedTable.splitBills) {
+      setSplitBillEnabled(updatedTable.splitBills.enabled);
+      setSplitMethod(updatedTable.splitBills.method || 'equal');
+      setDivisions(updatedTable.splitBills.divisions || []);
+    }
+    
+    // Fechar diálogo
+    setOpenSplitDialog(false);
+    
+    // Exibir mensagem de sucesso
+    setSuccess('Divisão de conta atualizada com sucesso');
+    
+    // Notificar outros usuários
+    emitTableUpdate();
+  } catch (err) {
+    console.error('Error updating split bill:', err);
+    setError(err.response?.data?.message || 'Erro ao atualizar divisão de contas.');
+  } finally {
+    setLoading(false);
+  }
+};
+
+// Adicione o método de pagamento para uma divisão específica
+const handleRequestDivisionPayment = async (index) => {
+  try {
+    setLoadingPayment(true);
+    
+    const division = divisions[index];
+    if (!division) {
+      throw new Error('Divisão não encontrada');
+    }
+    
+    // Emitir notificação de pagamento para o administrador e outros garçons
+    emitRequestPayment({
+      tableId: id,
+      tableNumber: table.tableNumber,
+      totalAmount: division.totalAmount,
+      requestedBy: user.name,
+      timestamp: new Date().toISOString(),
+      divisionName: division.name,
+      isDivided: true
+    });
+    
+    // Atualizar o status da divisão para 'pending'
+    const updatedDivisions = [...divisions];
+    updatedDivisions[index] = {
+      ...updatedDivisions[index],
+      paymentStatus: 'pending'
+    };
+    
+    setDivisions(updatedDivisions);
+    
+    await axios.post(`/api/tables/${id}/split`, {
+      enabled: splitBillEnabled,
+      method: splitMethod,
+      divisions: updatedDivisions
+    });
+    
+    // Fechar o diálogo
+    setSplitPaymentDialog(false);
+    
+    // Mostrar confirmação
+    setConfirmationDialog({
+      open: true,
+      title: 'Pagamento Parcial Solicitado',
+      message: `Pagamento de R$ ${division.totalAmount.toFixed(2)} para ${division.name} foi solicitado. A recepção e outros garçons serão notificados.`,
+      onConfirm: () => {
+        setConfirmationDialog({ ...confirmationDialog, open: false });
+      }
+    });
+  } catch (err) {
+    console.error('Error requesting division payment:', err);
+    setError('Erro ao solicitar pagamento parcial. Tente novamente.');
+  } finally {
+    setLoadingPayment(false);
+  }
+};
+
+// Modifique o método handleRequestPayment
+const handleRequestPayment = async () => {
+  try {
+    setError(null);
+    
+    // Verificar se tem divisão de conta habilitada
+    if (splitBillEnabled && divisions.length > 0) {
+      // Mostrar diálogo para selecionar qual divisão pagar
+      setSplitPaymentDialog(true);
+      return;
+    }
+    
+    // Resto do código permanece o mesmo...
+    // Se não houver divisão, continuar com o processo normal
+    
+    // Update all active orders to mark them for payment
+    const activeOrders = orders.filter(order => order.status === 'active');
+    
+    // Calcular o total da conta para incluir na notificação
+    const totalAmount = orders.reduce((sum, order) => sum + order.totalAmount, 0);
+    
+    for (const order of activeOrders) {
+      await axios.put(`/api/orders/${order._id}`, {
+        status: 'completed',
+        paymentStatus: 'pending'
+      });
+    }
+    
+    // Refresh orders
+    const ordersResponse = await axios.get(`/api/orders/table/${id}`);
+    const filteredOrders = ordersResponse.data.filter(order => 
+      order.status === 'active' || 
+      (order.status === 'completed' && (!order.paymentStatus || order.paymentStatus !== 'paid'))
+    );
+    setOrders(filteredOrders);
+    
+    // Emitir notificação de pagamento para o administrador e outros garçons
+    emitRequestPayment({
+      tableId: id,
+      tableNumber: table.tableNumber,
+      totalAmount: totalAmount,
+      requestedBy: user.name,
+      timestamp: new Date().toISOString(),
+      isDivided: false
+    });
+    
+    // Show confirmation
+    setConfirmationDialog({
+      open: true,
+      title: 'Pagamento Solicitado',
+      message: `Pagamento de R$ ${totalAmount.toFixed(2)} foi solicitado. A recepção e outros garçons serão notificados.`,
+      onConfirm: () => {
+        setConfirmationDialog({ ...confirmationDialog, open: false });
+      }
+    });
+  } catch (err) {
+    console.error('Error requesting payment:', err);
+    setError('Erro ao solicitar pagamento. Tente novamente.');
+  }
+};
+
+// Adicione o método para pagamento completo
+const handleRequestFullPayment = async () => {
+  try {
+    setLoadingPayment(true);
+    
+    // Update all active orders to mark them for payment
+    const activeOrders = orders.filter(order => order.status === 'active');
+    
+    // Calcular o total da conta
+    const totalAmount = calculateTotal();
+    
+    for (const order of activeOrders) {
+      await axios.put(`/api/orders/${order._id}`, {
+        status: 'completed',
+        paymentStatus: 'pending'
+      });
+    }
+    
+    // Refresh orders
+    const ordersResponse = await axios.get(`/api/orders/table/${id}`);
+    const filteredOrders = ordersResponse.data.filter(order => 
+      order.status === 'active' || 
+      (order.status === 'completed' && (!order.paymentStatus || order.paymentStatus !== 'paid'))
+    );
+    setOrders(filteredOrders);
+    
+    // Fechar o diálogo
+    setSplitPaymentDialog(false);
+    
+    // Emitir notificação de pagamento
+    emitRequestPayment({
+      tableId: id,
+      tableNumber: table.tableNumber,
+      totalAmount: totalAmount,
+      requestedBy: user.name,
+      timestamp: new Date().toISOString(),
+      isDivided: false
+    });
+    
+    // Show confirmation
+    setConfirmationDialog({
+      open: true,
+      title: 'Pagamento Completo Solicitado',
+      message: `Pagamento total de R$ ${totalAmount.toFixed(2)} foi solicitado. A recepção e outros garçons serão notificados.`,
+      onConfirm: () => {
+        setConfirmationDialog({ ...confirmationDialog, open: false });
+      }
+    });
+  } catch (err) {
+    console.error('Error requesting full payment:', err);
+    setError('Erro ao solicitar pagamento completo. Tente novamente.');
+  } finally {
+    setLoadingPayment(false);
+  }
+};
+
+// Substitua o diálogo de divisão de conta no JSX por:
+
+{/* Dialog for Split Bill Configuration */}
+<Dialog
+  open={openSplitDialog}
+  onClose={() => setOpenSplitDialog(false)}
+  fullWidth
+  maxWidth="sm"
+>
+  <DialogTitle>Divisão de Conta - Mesa {table?.tableNumber}</DialogTitle>
+  <DialogContent>
+    <SplitBillManager
+      enabled={splitBillEnabled}
+      onToggleEnabled={setSplitBillEnabled}
+      divisions={divisions}
+      onUpdateDivisions={setDivisions}
+      totalAmount={calculateTotal()}
+      method={splitMethod}
+      onMethodChange={setSplitMethod}
+      formatCurrency={formatCurrency}
+    />
+  </DialogContent>
+  <DialogActions>
+    <Button 
+      onClick={() => setOpenSplitDialog(false)} 
+      color="inherit"
+    >
+      Cancelar
+    </Button>
+    <Button 
+      onClick={handleSplitBill} 
+      color="primary"
+      variant="contained"
+      disabled={loading || 
+        (splitBillEnabled && divisions.length === 0) ||
+        (splitMethod === 'custom' && 
+          Math.abs(divisions.reduce((sum, div) => sum + (div.percentage || 0), 0) - 100) > 1)
+      }
+      startIcon={loading ? <CircularProgress size={20} /> : <SplitscreenIcon />}
+    >
+      Salvar
+    </Button>
+  </DialogActions>
+</Dialog>
+
+{/* Dialog para selecionar qual divisão pagar */}
+<SplitPaymentDialog
+  open={splitPaymentDialog}
+  onClose={() => setSplitPaymentDialog(false)}
+  divisions={divisions}
+  totalAmount={calculateTotal()}
+  onRequestFullPayment={handleRequestFullPayment}
+  onRequestDivisionPayment={handleRequestDivisionPayment}
+  loading={loadingPayment}
+  formatCurrency={formatCurrency}
+/>

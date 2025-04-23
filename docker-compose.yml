@@ -1,0 +1,50 @@
+version: '3.8'
+
+networks:
+  traefik-public:
+    external: true  # Usando a rede traefik-public existente
+
+services:
+  frontend:
+    image: marcussviniciusa/recantoverde-client:latest  # Substitua pela sua imagem no Docker Hub
+    container_name: recanto-verde-frontend
+    restart: always
+    networks:
+      - traefik-public
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.recanto-frontend.rule=Host(`recantoverde.marcussviniciusa.cloud`)"  # Definido no .env
+      - "traefik.http.routers.recanto-frontend.entrypoints=websecure"
+      - "traefik.http.routers.recanto-frontend.tls=true"
+      - "traefik.http.routers.recanto-frontend.tls.certresolver=letsencrypt"
+      - "traefik.http.services.recanto-frontend.loadbalancer.server.port=80"
+      - "traefik.docker.network=traefik-public"
+
+  backend:
+    image: marcussviniciusa/recantoverde-server:latest  # Substitua pela sua imagem no Docker Hub
+    container_name: recanto-verde-backend
+    restart: always
+    environment:
+      - NODE_ENV=production
+      - PORT=5000
+      - MONGO_URI=mongodb://admin:Marcus1911Marcus@206.183.131.10:27017/recanto_verdev2?authSource=admin  # Conexão com MongoDB existente
+      - JWT_SECRET=wtwHLYfFxI9n1zDR8zFFqNq8kVaWqdD2oLpcjVmMBmedewewFWFWFw
+      - JWT_EXPIRE=30d
+      - EMAIL_SERVICE=${EMAIL_SERVICE}
+      - EMAIL_USER=${EMAIL_USER}
+      - EMAIL_PASS=${EMAIL_PASS}
+    networks:
+      - traefik-public
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.recanto-api.rule=Host(`apirecantoverde.marcussviniciusa.cloud`)"  # Subdomínio para API
+      - "traefik.http.routers.recanto-api.entrypoints=websecure"
+      - "traefik.http.routers.recanto-api.tls=true"
+      - "traefik.http.routers.recanto-api.tls.certresolver=letsencrypt"
+      - "traefik.http.services.recanto-api.loadbalancer.server.port=5000"
+      - "traefik.docker.network=traefik-public"
+      - "traefik.http.middlewares.recanto-api-cors.headers.accesscontrolalloworiginlist=*"
+      - "traefik.http.middlewares.recanto-api-cors.headers.accesscontrolallowmethods=GET,POST,PUT,DELETE,OPTIONS"
+      - "traefik.http.middlewares.recanto-api-cors.headers.accesscontrolallowheaders=Content-Type,Authorization"
+      - "traefik.http.middlewares.recanto-api-cors.headers.accesscontrolmaxage=100"
+      - "traefik.http.routers.recanto-api.middlewares=recanto-api-cors"

@@ -139,8 +139,17 @@ const Header = ({ drawerWidth, open, toggleSidebar, isMobilePage }) => {
             <IconButton
               color="inherit"
               onClick={handleNotificationsOpen}
+              aria-label="Mostrar notificações"
+              aria-controls={Boolean(notificationsAnchor) ? 'notifications-menu' : undefined}
+              aria-haspopup="true"
+              aria-expanded={Boolean(notificationsAnchor) ? 'true' : undefined}
             >
-              <Badge badgeContent={unreadCount} color="error">
+              <Badge 
+                badgeContent={unreadCount} 
+                color="error"
+                overlap="circular"
+                variant={unreadCount > 0 ? "standard" : "dot"}
+              >
                 <NotificationsIcon />
               </Badge>
             </IconButton>
@@ -222,7 +231,7 @@ const Header = ({ drawerWidth, open, toggleSidebar, isMobilePage }) => {
         </MenuItem>
       </Menu>
       
-      {/* Notifications Menu */}
+      {/* Notifications Menu - com tamanho maior para acomodar a interface melhorada */}
       <Menu
         anchorEl={notificationsAnchor}
         id="notifications-menu"
@@ -231,13 +240,20 @@ const Header = ({ drawerWidth, open, toggleSidebar, isMobilePage }) => {
         transformOrigin={{ horizontal: 'right', vertical: 'top' }}
         anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}
         PaperProps={{
-          elevation: 2,
+          elevation: 3,
           sx: { 
-            maxHeight: 400,
+            maxHeight: 500,
             width: 320,
             maxWidth: '100%',
-            mt: 1.5
+            mt: 1.5,
+            '& .MuiMenuItem-root': {
+              padding: 0,
+            },
+            overflow: 'hidden'
           },
+        }}
+        MenuListProps={{
+          sx: { padding: 0 }
         }}
       >
         <NotificationList onClose={handleNotificationsClose} />

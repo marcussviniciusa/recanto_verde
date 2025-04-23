@@ -21,6 +21,7 @@ import TableRestaurantIcon from '@mui/icons-material/TableRestaurant';
 import PeopleIcon from '@mui/icons-material/People';
 import ReceiptIcon from '@mui/icons-material/Receipt';
 import InsightsIcon from '@mui/icons-material/Insights';
+import PaymentIcon from '@mui/icons-material/Payment';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import { useAuth } from '../../context/AuthContext';
 
@@ -67,6 +68,11 @@ const Sidebar = ({ drawerWidth, open, toggleSidebar, isMobilePage }) => {
       path: '/orders' 
     },
     { 
+      text: 'Pagamentos', 
+      icon: <PaymentIcon />, 
+      path: '/payments' 
+    },
+    { 
       text: 'Análises', 
       icon: <InsightsIcon />, 
       path: '/analytics' 
@@ -83,6 +89,11 @@ const Sidebar = ({ drawerWidth, open, toggleSidebar, isMobilePage }) => {
       text: 'Cardápio', 
       icon: <MenuBookIcon />, 
       path: '/menu' 
+    },
+    { 
+      text: 'Pagamentos', 
+      icon: <PaymentIcon />, 
+      path: '/payments' 
     }
   ];
   

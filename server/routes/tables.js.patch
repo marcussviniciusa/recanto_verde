@@ -1,0 +1,55 @@
+// Adicionar novo endpoint para gerenciar divisões de conta com mais recursos
+router.post('/tables/:id/splitpayment', authMiddleware, async (req, res) => {
+  try {
+    const { paymentInfo, divisionId } = req.body;
+    
+    // Buscar mesa
+    const table = await Table.findById(req.params.id);
+    if (!table) {
+      return res.status(404).json({ message: 'Mesa não encontrada' });
+    }
+    
+    // Verificar se divisão existe
+    if (!table.splitBills || !table.splitBills.enabled) {
+      return res.status(400).json({ message: 'Mesa não possui divisão de conta habilitada' });
+    }
+    
+    // Processar pagamento parcial
+    if (divisionId) {
+      // Encontrar a divisão específica
+      const divisionIndex = table.splitBills.divisions.findIndex(d => d._id.toString() === divisionId);
+      
+      if (divisionIndex === -1) {
+        return res.status(404).json({ message: 'Divisão não encontrada' });
+      }
+      
+      // Atualizar status de pagamento da divisão
+      table.splitBills.divisions[divisionIndex].paymentStatus = 'paid';
+      table.splitBills.divisions[divisionIndex].paidAmount = paymentInfo.amount;
+      table.splitBills.divisions[divisionIndex].paidAt = new Date();
+      
+      await table.save();
+      
+      return res.json({ success: true, message: 'Pagamento parcial processado com sucesso' });
+    } 
+    // Processar pagamento completo
+    else {
+      // Marcar todas as divisões como pagas
+      if (table.splitBills.divisions && table.splitBills.divisions.length > 0) {
+        table.splitBills.divisions = table.splitBills.divisions.map(division => ({
+          ...division,
+          paymentStatus: 'paid',
+          paidAmount: division.totalAmount,
+          paidAt: new Date()
+        }));
+      }
+      
+      await table.save();
+      
+      return res.json({ success: true, message: 'Pagamento completo processado com sucesso' });
+    }
+  } catch (err) {
+    console.error('Erro ao processar pagamento de divisão:', err);
+    res.status(500).json({ message: 'Erro ao processar pagamento' });
+  }
+});

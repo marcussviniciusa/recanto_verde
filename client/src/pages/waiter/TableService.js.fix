@@ -1,0 +1,125 @@
+// Esta parte modifica apenas o componente de diálogo de divisão de conta
+// Substitua o diálogo de divisão de conta existente por este:
+
+import SplitBillManager from '../../components/payments/SplitBillManager';
+import SplitPaymentDialog from '../../components/payments/SplitPaymentDialog';
+
+// Dentro do componente TableService, substitua:
+// const [splitBillEnabled, setSplitBillEnabled] = useState(false);
+// const [divisions, setDivisions] = useState([]);
+// const [openSplitDialog, setOpenSplitDialog] = useState(false);
+
+// Por:
+const [splitBillEnabled, setSplitBillEnabled] = useState(table?.splitBills?.enabled || false);
+const [divisions, setDivisions] = useState(table?.splitBills?.divisions || []);
+const [openSplitDialog, setOpenSplitDialog] = useState(false);
+const [splitMethod, setSplitMethod] = useState(table?.splitBills?.method || 'equal');
+const [splitPaymentDialog, setSplitPaymentDialog] = useState(false);
+const [loadingPayment, setLoadingPayment] = useState(false);
+
+// Substitua o método handleSplitBill por:
+const handleSplitBill = async () => {
+  try {
+    setLoading(true);
+    
+    await axios.post(`/api/tables/${id}/split`, {
+      enabled: splitBillEnabled,
+      method: splitMethod,
+      divisions: divisions
+    });
+    
+    // Buscar mesa atualizada
+    const updatedTable = await fetchTable();
+    
+    // Atualizar estados locais com base nos dados do servidor
+    if (updatedTable.splitBills) {
+      setSplitBillEnabled(updatedTable.splitBills.enabled);
+      setSplitMethod(updatedTable.splitBills.method || 'equal');
+      setDivisions(updatedTable.splitBills.divisions || []);
+    }
+    
+    // Fechar diálogo
+    setOpenSplitDialog(false);
+    
+    // Exibir mensagem de sucesso
+    setSuccess('Divisão de conta atualizada com sucesso');
+    
+    // Notificar outros usuários
+    emitTableUpdate();
+  } catch (err) {
+    console.error('Error updating split bill:', err);
+    setError(err.response?.data?.message || 'Erro ao atualizar divisão de contas.');
+  } finally {
+    setLoading(false);
+  }
+};
+
+// Adicione o método de pagamento para uma divisão específica:
+const handleRequestDivisionPayment = async (index) => {
+  try {
+    setLoadingPayment(true);
+    
+    const division = divisions[index];
+    if (!division) {
+      throw new Error('Divisão não encontrada');
+    }
+    
+    // Emitir notificação de pagamento para o administrador e outros garçons
+    emitRequestPayment({
+      tableId: id,
+      tableNumber: table.tableNumber,
+      totalAmount: division.totalAmount,
+      requestedBy: user.name,
+      timestamp: new Date().toISOString(),
+      divisionName: division.name,
+      isDivided: true
+    });
+    
+    // Atualizar o status da divisão para 'pending'
+    const updatedDivisions = [...divisions];
+    updatedDivisions[index] = {
+      ...updatedDivisions[index],
+      paymentStatus: 'pending'
+    };
+    
+    setDivisions(updatedDivisions);
+    
+    await axios.post(`/api/tables/${id}/split`, {
+      enabled: splitBillEnabled,
+      method: splitMethod,
+      divisions: updatedDivisions
+    });
+    
+    // Fechar o diálogo
+    setSplitPaymentDialog(false);
+    
+    // Mostrar confirmação
+    setConfirmationDialog({
+      open: true,
+      title: 'Pagamento Parcial Solicitado',
+      message: `Pagamento de R$ ${division.totalAmount.toFixed(2)} para ${division.name} foi solicitado. A recepção e outros garçons serão notificados.`,
+      onConfirm: () => {
+        setConfirmationDialog({ ...confirmationDialog, open: false });
+      }
+    });
+  } catch (err) {
+    console.error('Error requesting division payment:', err);
+    setError('Erro ao solicitar pagamento parcial. Tente novamente.');
+  } finally {
+    setLoadingPayment(false);
+  }
+};
+
+// Modifique o método handleRequestPayment:
+const handleRequestPayment = async () => {
+  try {
+    setError(null);
+    
+    // Verificar se tem divisão de conta habilitada
+    if (splitBillEnabled && divisions.length > 0) {
+      // Mostrar diálogo para selecionar qual divisão pagar
+      setSplitPaymentDialog(true);
+      return;
+    }
+    
+    // Resto do código permanece o mesmo...

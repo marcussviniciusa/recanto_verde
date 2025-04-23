@@ -15,11 +15,13 @@ import Analytics from './pages/superadmin/Analytics';
 import WaiterDashboard from './pages/waiter/Dashboard';
 import TableService from './pages/waiter/TableService';
 import OrderCreation from './pages/waiter/OrderCreation';
+import PaymentRequests from './pages/common/PaymentRequests';
 import Profile from './pages/Profile';
 
 // Components
 import ProtectedRoute from './components/ProtectedRoute';
 import NotFound from './components/NotFound';
+import ToastManager from './components/notifications/ToastManager';
 
 const theme = createTheme({
   palette: {
@@ -52,6 +54,8 @@ function App() {
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <Router>
+        {/* Sistema de notificações com toast */}
+        {user && <ToastManager />}
         <Routes>
           <Route path="/login" element={!user ? <Login /> : <Navigate to="/" />} />
           
@@ -139,6 +143,15 @@ function App() {
           />
           
           {/* Common Routes */}
+          <Route 
+            path="/payments" 
+            element={
+              <ProtectedRoute>
+                <PaymentRequests />
+              </ProtectedRoute>
+            } 
+          />
+          
           <Route 
             path="/profile" 
             element={

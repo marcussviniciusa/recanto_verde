@@ -69,6 +69,8 @@ io.on('connection', (socket) => {
   // New order notification
   socket.on('newOrder', (data) => {
     io.to('superadmin').emit('orderNotification', data);
+    // Enviar notificação também para outros garçons
+    io.to('waiter').emit('orderNotification', data);
   });
   
   // Order ready notification
@@ -88,14 +90,12 @@ io.on('connection', (socket) => {
   });
 });
 
-// Serve static assets in production
-if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(path.join(__dirname, '../client/build')));
-  
-  app.get('*', (req, res) => {
-    res.sendFile(path.resolve(__dirname, '../client', 'build', 'index.html'));
-  });
-}
+// API health check endpoint
+app.get('/api/health', (req, res) => {
+  res.status(200).json({ status: 'ok', message: 'API is running' });
+});
+
+// No need to serve static files - this is handled by Nginx in the frontend container
 
 // Connect to MongoDB
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/recanto_verde';
